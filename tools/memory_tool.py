@@ -220,9 +220,18 @@ class MemoryStore:
         """Re-read entries from disk into in-memory state.
 
         Called under file lock to get the latest state before mutating.
+        In scoped mode, merges entries from ALL memory dirs (matching
+        load_from_disk behaviour) so global entries are not lost.
         """
-        fresh = self._read_file(self._scoped_path_for(target))
-        fresh = list(dict.fromkeys(fresh))  # deduplicate
+        if self._memory_dirs:
+            merged: List[str] = []
+            fname = "USER.md" if target == "user" else "MEMORY.md"
+            for d in self._memory_dirs:
+                merged.extend(self._read_file(d / fname))
+            fresh = list(dict.fromkeys(merged))  # deduplicate
+        else:
+            fresh = self._read_file(self._path_for(target))
+            fresh = list(dict.fromkeys(fresh))  # deduplicate
         self._set_entries(target, fresh)
 
     def save_to_disk(self, target: str):

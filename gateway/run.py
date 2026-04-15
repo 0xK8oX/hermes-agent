@@ -6546,7 +6546,8 @@ class GatewayRunner:
             _memory_scope = None
             try:
                 from gateway.extensions import fire_hooks_first
-                _memory_scope = fire_hooks_first("get_memory_scope", task_id)
+                _bg_session_key = self._session_key_for_source(source)
+                _memory_scope = fire_hooks_first("get_memory_scope", _bg_session_key)
             except Exception:
                 pass
 
@@ -9745,7 +9746,7 @@ class GatewayRunner:
             _persist_mem_scope = None
             try:
                 from gateway.extensions import fire_hooks_first
-                _persist_mem_scope = fire_hooks_first("get_memory_scope", session_id)
+                _persist_mem_scope = fire_hooks_first("get_memory_scope", session_key)
             except Exception:
                 pass
 
