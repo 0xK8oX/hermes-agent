@@ -79,7 +79,7 @@ _CONFIG_BINDINGS_CACHE: Optional[Dict[str, list]] = None
 
 def _load_soul_content(soul_name: str) -> Optional[str]:
     """Load soul content from ~/.hermes/souls/<soul_name>.md."""
-    if "/" in soul_name or "\\" in soul_name or ".." in soul_name:
+    if "\x00" in soul_name or "/" in soul_name or "\\" in soul_name or ".." in soul_name:
         logger.warning("[ChannelBinding] Invalid soul name (path traversal): %s", soul_name)
         return None
 
@@ -387,8 +387,8 @@ def resolve_memory_dirs(scope: Optional[str]) -> List[Path]:
     if global_dir.exists():
         dirs.append(global_dir)
 
-    if not scope:
-        # No scope — read from base dir (backward compatible)
+    if not scope or not scope.strip():
+        # No scope (or whitespace-only) — read from base dir (backward compatible)
         return dirs if dirs else [base]
 
     if scope == "*":
@@ -400,8 +400,8 @@ def resolve_memory_dirs(scope: Optional[str]) -> List[Path]:
         return dirs
 
     # Named scope — read specific subdirectory
-    # Validate against path traversal
-    if "/" in scope or "\\" in scope or ".." in scope:
+    # Validate against path traversal and null bytes
+    if "\x00" in scope or "/" in scope or "\\" in scope or ".." in scope:
         logger.error("Invalid memory scope (path traversal): %s", scope)
         return dirs if dirs else [base]
 

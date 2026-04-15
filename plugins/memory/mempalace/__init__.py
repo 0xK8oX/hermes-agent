@@ -65,6 +65,7 @@ class MemPalaceProvider(MemoryProvider):
         self._layers_baked: bool = False
         self._cached_system_block: str = ""
         self._cached_prefetch: str = ""
+        self._prefetch_running: bool = False
         self._prefetch_lock: threading.Lock = threading.Lock()
         self._kg = None  # KnowledgeGraph, lazy init
         self._chroma_client = None
@@ -174,6 +175,7 @@ class MemPalaceProvider(MemoryProvider):
             logger.warning("MemPalace system_prompt_block failed: %s", e)
             self._cached_system_block = ""
 
+        # Only mark baked if we got something useful (or empty is fine — don't retry endlessly)
         self._layers_baked = True
         return self._cached_system_block
 
@@ -253,6 +255,8 @@ class MemPalaceProvider(MemoryProvider):
 
     def handle_tool_call(self, tool_name: str, args: Dict[str, Any], **kwargs) -> str:
         """Dispatch tool calls."""
+        if not self._initialized:
+            return json.dumps({"success": False, "error": "MemPalace not initialized. Check Ollama is running."})
         if tool_name == "mempalace_search":
             return self._tool_search(args)
         elif tool_name == "mempalace_add":
@@ -314,13 +318,22 @@ class MemPalaceProvider(MemoryProvider):
             logger.error("Failed to save mempalace config: %s", e)
 
     def shutdown(self) -> None:
-        """Clean shutdown."""
+        """Clean shutdown — reset state for potential re-initialization."""
         if self._kg:
             try:
                 self._kg.close()
             except Exception:
                 pass
             self._kg = None
+
+        self._initialized = False
+        self._collection = None
+        self._chroma_client = None
+        self._layers_baked = False
+        self._cached_system_block = ""
+        self._cached_prefetch = ""
+        with self._prefetch_lock:
+            self._prefetch_running = False
 
     # -- Internal -------------------------------------------------------------
 

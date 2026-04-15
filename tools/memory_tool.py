@@ -243,6 +243,16 @@ class MemoryStore:
         global_dir = self._memory_dirs[0]
         return self._read_file(Path(global_dir) / fname)
 
+    def _is_global_entry(self, target: str, entry: str) -> bool:
+        """Check if an entry originated from the global directory.
+
+        In scoped mode (multiple dirs), entries from _memory_dirs[0] (global)
+        cannot be mutated — only scoped entries can be replaced/removed.
+        """
+        if not self._memory_dirs or len(self._memory_dirs) < 2:
+            return False  # Not in scoped mode — all entries are fair game
+        return entry in self._global_entries(target)
+
     def save_to_disk(self, target: str):
         """Persist entries to the appropriate file. Called after every mutation.
 
@@ -366,6 +376,17 @@ class MemoryStore:
             idx = matches[0][0]
             limit = self._char_limit(target)
 
+            # Block mutation of global entries in scoped mode
+            if self._is_global_entry(target, entries[idx]):
+                return {
+                    "success": False,
+                    "error": (
+                        f"This entry is from the global memory scope and cannot be "
+                        f"modified from a scoped session. Edit the global MEMORY.md "
+                        f"directly, or ask an admin to update it."
+                    ),
+                }
+
             # Check that replacement doesn't blow the budget
             test_entries = entries.copy()
             test_entries[idx] = new_content
@@ -414,6 +435,18 @@ class MemoryStore:
                 # All identical -- safe to remove just the first
 
             idx = matches[0][0]
+
+            # Block mutation of global entries in scoped mode
+            if self._is_global_entry(target, entries[idx]):
+                return {
+                    "success": False,
+                    "error": (
+                        f"This entry is from the global memory scope and cannot be "
+                        f"removed from a scoped session. Edit the global MEMORY.md "
+                        f"directly, or ask an admin to update it."
+                    ),
+                }
+
             entries.pop(idx)
             self._set_entries(target, entries)
             self.save_to_disk(target)

@@ -383,6 +383,7 @@ class TestIntegration:
                 memory_scope=memory_scope,
             )
         p._collection = self._make_fake_col()
+        p._initialized = True  # Enable tool dispatch after fake collection injection
         return p
 
     def test_add_and_search(self, hermes_home):

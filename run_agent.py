@@ -1414,6 +1414,8 @@ class AIAgent:
         self._memory_flush_min_turns = 6
         self._turns_since_memory = 0
         self._iters_since_skill = 0
+        self._memory_scope = memory_scope  # Always store — needed by provider init
+
         if not skip_memory:
             try:
                 mem_config = _agent_cfg.get("memory", {})
@@ -1427,7 +1429,6 @@ class AIAgent:
                     # Resolve scoped memory directories if memory_scope is set
                     _memory_dirs = None
                     if memory_scope:
-                        self._memory_scope = memory_scope  # Store for provider init
                         try:
                             from gateway.extensions.channel_binding import resolve_memory_dirs
                             _resolved = resolve_memory_dirs(memory_scope)
