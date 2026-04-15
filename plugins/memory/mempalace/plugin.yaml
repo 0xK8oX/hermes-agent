@@ -1,0 +1,9 @@
+name: mempalace
+version: 1.0.0
+description: "Structured long-term memory via MemPalace — Wing/Room/Drawer hierarchy, AAAK compression, temporal knowledge graph. Zero API key required."
+pip_dependencies:
+  - mempalace>=3.3.0
+hooks:
+  - on_turn_start
+  - on_session_end
+  - on_memory_write

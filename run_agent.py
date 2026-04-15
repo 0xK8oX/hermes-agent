@@ -1491,6 +1491,9 @@ class AIAgent:
                             _init_kwargs["agent_workspace"] = "hermes"
                         except Exception:
                             pass
+                        # Channel binding memory scope → provider wing mapping
+                        if getattr(self, "_memory_scope", None):
+                            _init_kwargs["memory_scope"] = self._memory_scope
                         self._memory_manager.initialize_all(**_init_kwargs)
                         logger.info("Memory provider '%s' activated", _mem_provider_name)
                     else:
