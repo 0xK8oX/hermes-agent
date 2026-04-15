@@ -21,7 +21,7 @@ from typing import Any, Dict, Optional
 
 _DEFAULTS: Dict[str, Any] = {
     "data_path": "~/.hermes/mempalace",
-    "embedding_model": "BAAI/bge-small-zh-v1.5",
+    "embedding_model": "bge-m3",
     "compression_ratio": 30,
     "enable_kg": True,
     "recall_mode": "hybrid",     # context | tools | hybrid

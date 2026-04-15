@@ -323,14 +323,10 @@ class TestPluginDiscovery:
 # ===========================================================================
 
 class TestIntegration:
-    """End-to-end add and search (mocked ChromaDB to avoid ONNX download)."""
+    """End-to-end add and search (FakeCol mock, no ChromaDB/Ollama needed)."""
 
-    @pytest.fixture(autouse=True)
-    def _mock_chroma(self, hermes_home):
-        """Setup for mocked ChromaDB tests."""
-        yield
-
-    def _patch_get_collection(self):
+    @staticmethod
+    def _make_fake_col():
         """Return a fake collection for testing (no ChromaDB dependency)."""
         class FakeCol:
             def __init__(self):
@@ -373,22 +369,29 @@ class TestIntegration:
 
         return FakeCol()
 
-    def test_add_and_search(self, hermes_home):
-        """Add a drawer, then search should find it."""
+    def _make_provider(self, hermes_home, memory_scope="dev"):
+        """Create a provider with a fake collection injected."""
         from unittest.mock import patch
         from plugins.memory.mempalace import MemPalaceProvider
 
-        fake_col = self._patch_get_collection()
-
-        with patch("mempalace.palace.get_collection", return_value=fake_col), \
-             patch("mempalace.searcher.search_memories", side_effect=lambda **kw: {"results": []}):
-            p = MemPalaceProvider()
+        p = MemPalaceProvider()
+        # Patch _init_chroma to do nothing, then inject fake collection
+        with patch.object(p, "_init_chroma"):
             p.initialize(
                 session_id="test",
                 hermes_home=str(hermes_home),
-                memory_scope="dev",
+                memory_scope=memory_scope,
             )
+        p._collection = self._make_fake_col()
+        return p
 
+    def test_add_and_search(self, hermes_home):
+        """Add a drawer, then search should find it."""
+        from unittest.mock import patch
+
+        p = self._make_provider(hermes_home, memory_scope="dev")
+
+        with patch("mempalace.searcher.search_memories", side_effect=lambda **kw: {"results": []}):
             unique_text = "Unicorn debugging technique for quantum code review 42xyz"
             result = p.handle_tool_call(
                 "mempalace_add",
@@ -407,37 +410,26 @@ class TestIntegration:
 
     def test_status_after_add(self, hermes_home):
         """Status should show increased count after adding."""
-        from unittest.mock import patch
-        from plugins.memory.mempalace import MemPalaceProvider
+        p = self._make_provider(hermes_home, memory_scope="dev")
 
-        fake_col = self._patch_get_collection()
+        # Get initial status
+        result = p.handle_tool_call("mempalace_status", {})
+        before = json.loads(result)
+        assert before["total_drawers"] == 0
 
-        with patch("mempalace.palace.get_collection", return_value=fake_col):
-            p = MemPalaceProvider()
-            p.initialize(
-                session_id="test",
-                hermes_home=str(hermes_home),
-                memory_scope="dev",
-            )
+        # Add a drawer
+        result = p.handle_tool_call(
+            "mempalace_add",
+            {"content": "Test entry for status check", "wing": "dev"},
+        )
+        add_result = json.loads(result)
+        assert add_result.get("success") is True
 
-            # Get initial status
-            result = p.handle_tool_call("mempalace_status", {})
-            before = json.loads(result)
-            assert before["total_drawers"] == 0
+        # Get updated status
+        result = p.handle_tool_call("mempalace_status", {})
+        after = json.loads(result)
 
-            # Add a drawer
-            result = p.handle_tool_call(
-                "mempalace_add",
-                {"content": "Test entry for status check", "wing": "dev"},
-            )
-            add_result = json.loads(result)
-            assert add_result.get("success") is True
+        assert after["total_drawers"] >= 1
+        assert "dev" in after["wings"]
 
-            # Get updated status
-            result = p.handle_tool_call("mempalace_status", {})
-            after = json.loads(result)
-
-            assert after["total_drawers"] >= 1
-            assert "dev" in after["wings"]
-
-            p.shutdown()
+        p.shutdown()

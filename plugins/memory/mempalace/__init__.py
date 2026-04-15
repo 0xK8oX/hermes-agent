@@ -68,6 +68,8 @@ class MemPalaceProvider(MemoryProvider):
         self._prefetch_event: threading.Event = threading.Event()
         self._prefetch_lock: threading.Lock = threading.Lock()
         self._kg = None  # KnowledgeGraph, lazy init
+        self._chroma_client = None
+        self._collection = None
 
     # -- MemoryProvider ABC ---------------------------------------------------
 
@@ -107,6 +109,9 @@ class MemPalaceProvider(MemoryProvider):
 
         # Set MemPalace env so its internal config resolves to our path
         os.environ["MEMPALACE_PALACE_PATH"] = palace_path
+
+        # Init ChromaDB with Ollama embedding (bge-m3 for zh+en)
+        self._init_chroma(palace_path)
 
         self._initialized = True
         self._layers_baked = False
@@ -263,7 +268,7 @@ class MemPalaceProvider(MemoryProvider):
             {
                 "key": "embedding_model",
                 "description": "Embedding model for semantic search",
-                "default": "BAAI/bge-small-zh-v1.5",
+                "default": "bge-m3",
                 "required": False,
             },
             {
@@ -313,6 +318,40 @@ class MemPalaceProvider(MemoryProvider):
 
     # -- Internal -------------------------------------------------------------
 
+    def _init_chroma(self, palace_path: str) -> None:
+        """Init ChromaDB client with Ollama embedding function."""
+        try:
+            import chromadb
+            from chromadb.utils.embedding_functions import OllamaEmbeddingFunction
+
+            ef = OllamaEmbeddingFunction(
+                url="http://localhost:11434",
+                model_name=self._cfg.embedding_model,
+            )
+
+            self._chroma_client = chromadb.PersistentClient(path=palace_path)
+            self._collection = self._chroma_client.get_or_create_collection(
+                name="mempalace_drawers",
+                embedding_function=ef,
+                metadata={"hnsw:space": "cosine"},
+            )
+            logger.info(
+                "ChromaDB initialized with Ollama/%s at %s",
+                self._cfg.embedding_model, palace_path,
+            )
+        except Exception as e:
+            logger.warning("ChromaDB init failed (will retry on access): %s", e)
+            self._chroma_client = None
+            self._collection = None
+
+    def _get_collection(self):
+        """Get collection, lazy-init if needed."""
+        if self._collection is not None:
+            return self._collection
+        if self._cfg:
+            self._init_chroma(self._cfg.data_path)
+        return self._collection
+
     def _bg_prefetch(self, query: str) -> None:
         """Background thread: run semantic search and cache result."""
         try:
@@ -332,8 +371,10 @@ class MemPalaceProvider(MemoryProvider):
                     importance: float = 3.0) -> str:
         """Add a drawer to the palace."""
         try:
-            from mempalace.palace import get_collection
-            col = get_collection(self._cfg.data_path, create=True)
+            col = self._get_collection()
+            if col is None:
+                logger.error("No ChromaDB collection available")
+                return ""
 
             drawer_id = hashlib.sha256(
                 f"{content[:200]}:{time.time()}".encode()
@@ -379,16 +420,42 @@ class MemPalaceProvider(MemoryProvider):
         n_results = args.get("n_results", self._cfg.search_n_results)
 
         try:
-            from mempalace.searcher import search_memories
-            result = search_memories(
-                query=query,
-                palace_path=self._cfg.data_path,
-                wing=wing,
-                room=room,
-                n_results=n_results,
-                max_distance=self._cfg.search_max_distance,
-            )
-            return json.dumps(result, default=str)
+            col = self._get_collection()
+            if col is None:
+                return json.dumps({"error": "ChromaDB not initialized", "results": []})
+
+            where_filter = {}
+            if wing:
+                where_filter["wing"] = wing
+            if room:
+                where_filter["room"] = room
+
+            query_kwargs = {
+                "query_texts": [query],
+                "n_results": n_results,
+                "include": ["documents", "metadatas", "distances"],
+            }
+            if where_filter:
+                query_kwargs["where"] = where_filter
+
+            result = col.query(**query_kwargs)
+
+            # Format results
+            results = []
+            if result and result.get("ids") and result["ids"][0]:
+                for i, doc_id in enumerate(result["ids"][0]):
+                    entry = {
+                        "id": doc_id,
+                        "content": result["documents"][0][i] if result["documents"] else "",
+                        "distance": result["distances"][0][i] if result["distances"] else None,
+                        "metadata": result["metadatas"][0][i] if result["metadatas"] else {},
+                    }
+                    # Filter by max_distance
+                    if entry["distance"] is not None and entry["distance"] > self._cfg.search_max_distance:
+                        continue
+                    results.append(entry)
+
+            return json.dumps({"results": results, "total": len(results)}, default=str)
         except Exception as e:
             return json.dumps({"error": str(e), "results": []})
 
@@ -426,8 +493,14 @@ class MemPalaceProvider(MemoryProvider):
     def _tool_status(self, args: Dict[str, Any]) -> str:
         """Handle mempalace_status tool call."""
         try:
-            from mempalace.palace import get_collection
-            col = get_collection(self._cfg.data_path, create=False)
+            col = self._get_collection()
+            if col is None:
+                return json.dumps({
+                    "total_drawers": 0,
+                    "wings": {},
+                    "current_wing": self._wing,
+                    "error": "ChromaDB not initialized",
+                })
 
             # Get total count
             all_data = col.get(include=["metadatas"])
