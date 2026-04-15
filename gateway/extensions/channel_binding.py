@@ -400,6 +400,11 @@ def resolve_memory_dirs(scope: Optional[str]) -> List[Path]:
         return dirs
 
     # Named scope — read specific subdirectory
+    # Validate against path traversal
+    if "/" in scope or "\\" in scope or ".." in scope:
+        logger.error("Invalid memory scope (path traversal): %s", scope)
+        return dirs if dirs else [base]
+
     scoped_dir = base / scope
     if scoped_dir.exists():
         dirs.append(scoped_dir)

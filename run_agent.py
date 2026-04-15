@@ -762,7 +762,7 @@ class AIAgent:
         checkpoint_max_snapshots: int = 50,
         pass_session_id: bool = False,
         persist_session: bool = True,
-        memory_scope: str = None,
+        memory_scope: Optional[str] = None,
     ):
         """
         Initialize the AI Agent.
@@ -1427,6 +1427,7 @@ class AIAgent:
                     # Resolve scoped memory directories if memory_scope is set
                     _memory_dirs = None
                     if memory_scope:
+                        self._memory_scope = memory_scope  # Store for provider init
                         try:
                             from gateway.extensions.channel_binding import resolve_memory_dirs
                             _resolved = resolve_memory_dirs(memory_scope)

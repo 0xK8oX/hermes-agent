@@ -234,10 +234,32 @@ class MemoryStore:
             fresh = list(dict.fromkeys(fresh))  # deduplicate
         self._set_entries(target, fresh)
 
+    def _global_entries(self, target: str) -> List[str]:
+        """Read entries from global dir only (to subtract from save)."""
+        if not self._memory_dirs or len(self._memory_dirs) < 2:
+            return []
+        fname = "USER.md" if target == "user" else "MEMORY.md"
+        # First dir in _memory_dirs is always _global/
+        global_dir = self._memory_dirs[0]
+        return self._read_file(Path(global_dir) / fname)
+
     def save_to_disk(self, target: str):
-        """Persist entries to the appropriate file. Called after every mutation."""
+        """Persist entries to the appropriate file. Called after every mutation.
+
+        In scoped mode, only writes entries that are NOT already in _global/
+        to the scoped file. This prevents global entries from being duplicated
+        into the scoped file on every write.
+        """
         self._write_dir.mkdir(parents=True, exist_ok=True)
-        self._write_file(self._scoped_path_for(target), self._entries_for(target))
+        all_entries = self._entries_for(target)
+
+        if self._memory_dirs and len(self._memory_dirs) > 1:
+            # Subtract global entries — only save scoped-only entries
+            global_set = set(self._global_entries(target))
+            scoped_only = [e for e in all_entries if e not in global_set]
+            self._write_file(self._scoped_path_for(target), scoped_only)
+        else:
+            self._write_file(self._scoped_path_for(target), all_entries)
 
     def _entries_for(self, target: str) -> List[str]:
         if target == "user":
@@ -272,7 +294,7 @@ class MemoryStore:
         if scan_error:
             return {"success": False, "error": scan_error}
 
-        with self._file_lock(self._path_for(target)):
+        with self._file_lock(self._scoped_path_for(target)):
             # Re-read from disk under lock to pick up writes from other sessions
             self._reload_target(target)
 
@@ -320,7 +342,7 @@ class MemoryStore:
         if scan_error:
             return {"success": False, "error": scan_error}
 
-        with self._file_lock(self._path_for(target)):
+        with self._file_lock(self._scoped_path_for(target)):
             self._reload_target(target)
 
             entries = self._entries_for(target)
@@ -370,7 +392,7 @@ class MemoryStore:
         if not old_text:
             return {"success": False, "error": "old_text cannot be empty."}
 
-        with self._file_lock(self._path_for(target)):
+        with self._file_lock(self._scoped_path_for(target)):
             self._reload_target(target)
 
             entries = self._entries_for(target)

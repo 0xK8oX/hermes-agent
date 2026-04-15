@@ -65,7 +65,6 @@ class MemPalaceProvider(MemoryProvider):
         self._layers_baked: bool = False
         self._cached_system_block: str = ""
         self._cached_prefetch: str = ""
-        self._prefetch_event: threading.Event = threading.Event()
         self._prefetch_lock: threading.Lock = threading.Lock()
         self._kg = None  # KnowledgeGraph, lazy init
         self._chroma_client = None
@@ -112,6 +111,10 @@ class MemPalaceProvider(MemoryProvider):
 
         # Init ChromaDB with Ollama embedding (bge-m3 for zh+en)
         self._init_chroma(palace_path)
+
+        if self._collection is None:
+            logger.error("MemPalace init failed: ChromaDB collection not available")
+            return
 
         self._initialized = True
         self._layers_baked = False
@@ -178,15 +181,18 @@ class MemPalaceProvider(MemoryProvider):
         """Return cached background prefetch result."""
         if self._cron_skipped or not self._initialized:
             return ""
-        return self._cached_prefetch
+        with self._prefetch_lock:
+            return self._cached_prefetch
 
     def queue_prefetch(self, query: str, *, session_id: str = "") -> None:
-        """Fire background semantic search for next turn."""
+        """Fire background semantic search for next turn (deduplicated)."""
         if self._cron_skipped or not self._initialized:
             return
         if self._cfg.recall_mode == "context":
-            # In context mode, prefetch is injected into system prompt,
-            # not as a tool — fire background search
+            with self._prefetch_lock:
+                if getattr(self, "_prefetch_running", False):
+                    return  # Already prefetching, skip
+                self._prefetch_running = True
             t = threading.Thread(
                 target=self._bg_prefetch, args=(query,), daemon=True,
             )
@@ -345,11 +351,15 @@ class MemPalaceProvider(MemoryProvider):
             self._collection = None
 
     def _get_collection(self):
-        """Get collection, lazy-init if needed."""
+        """Get collection, lazy-init if needed (thread-safe)."""
         if self._collection is not None:
             return self._collection
-        if self._cfg:
-            self._init_chroma(self._cfg.data_path)
+        with self._prefetch_lock:  # reuse existing lock for thread safety
+            # Double-check after acquiring lock
+            if self._collection is not None:
+                return self._collection
+            if self._cfg:
+                self._init_chroma(self._cfg.data_path)
         return self._collection
 
     def _bg_prefetch(self, query: str) -> None:
@@ -366,6 +376,9 @@ class MemPalaceProvider(MemoryProvider):
                 self._cached_prefetch = result
         except Exception as e:
             logger.debug("Background prefetch failed: %s", e)
+        finally:
+            with self._prefetch_lock:
+                self._prefetch_running = False
 
     def _add_drawer(self, content: str, wing: str, room: str,
                     importance: float = 3.0) -> str:
