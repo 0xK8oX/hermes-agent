@@ -163,8 +163,8 @@ TOOLSETS = {
     },
     
     "memory": {
-        "description": "Persistent memory across sessions (personal notes + user profile)",
-        "tools": ["memory"],
+        "description": "Persistent memory across sessions (personal notes + user profile) + inter-soul messaging (Hall)",
+        "tools": ["memory", "hall"],
         "includes": []
     },
     
