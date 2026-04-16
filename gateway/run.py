@@ -6555,10 +6555,12 @@ class GatewayRunner:
 
             # Resolve memory scope from channel binding extension
             _memory_scope = None
+            _bg_soul_content = None
             try:
                 from gateway.extensions import fire_hooks_first
                 _bg_session_key = self._session_key_for_source(source)
                 _memory_scope = fire_hooks_first("get_memory_scope", _bg_session_key)
+                _bg_soul_content = fire_hooks_first("get_ephemeral", _bg_session_key)
             except Exception:
                 pass
 
@@ -6585,6 +6587,7 @@ class GatewayRunner:
                     session_db=self._session_db,
                     fallback_model=self._fallback_model,
                     memory_scope=_memory_scope,
+                    soul_content=_bg_soul_content,
                 )
                 try:
                     return agent.run_conversation(
@@ -9907,6 +9910,7 @@ class GatewayRunner:
                     session_db=self._session_db,
                     fallback_model=self._fallback_model,
                     memory_scope=_persist_mem_scope,
+                    soul_content=_ch_ephemeral,
                 )
                 if _cache_lock and _cache is not None:
                     with _cache_lock:

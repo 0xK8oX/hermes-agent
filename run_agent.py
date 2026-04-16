@@ -759,6 +759,7 @@ class AIAgent:
         pass_session_id: bool = False,
         persist_session: bool = True,
         memory_scope: Optional[str] = None,
+        soul_content: Optional[str] = None,
     ):
         """
         Initialize the AI Agent.
@@ -1411,6 +1412,7 @@ class AIAgent:
         self._turns_since_memory = 0
         self._iters_since_skill = 0
         self._memory_scope = memory_scope  # Always store — needed by provider init
+        self._soul_content = soul_content  # Channel binding soul for cold start
 
         if not skip_memory:
             try:
@@ -1492,6 +1494,9 @@ class AIAgent:
                         # Channel binding memory scope → provider wing mapping
                         if getattr(self, "_memory_scope", None):
                             _init_kwargs["memory_scope"] = self._memory_scope
+                        # Channel binding soul content → provider cold start seed
+                        if getattr(self, "_soul_content", None):
+                            _init_kwargs["soul_content"] = self._soul_content
                         self._memory_manager.initialize_all(**_init_kwargs)
                         logger.info(
                             "[MemDebug] initialize_all done: memory_scope=%s, providers=%s, tool_schemas=%d",

@@ -71,6 +71,8 @@ class MemPalaceProvider(MemoryProvider):
         self._kg = None  # KnowledgeGraph, lazy init
         self._chroma_client = None
         self._collection = None
+        self._soul_content: Optional[str] = None  # Channel soul for cold start
+        self._soul_embedding: Optional[List[float]] = None  # Cached embedding
 
     # -- MemoryProvider ABC ---------------------------------------------------
 
@@ -103,6 +105,10 @@ class MemPalaceProvider(MemoryProvider):
 
         # Scope → Wing mapping from channel binding
         self._wing = kwargs.get("memory_scope") or None
+
+        # Soul content for cold start semantic gate
+        self._soul_content = kwargs.get("soul_content") or None
+        self._soul_embedding = None  # Reset — will be computed lazily
 
         # Ensure palace directory exists
         palace_path = self._cfg.data_path
@@ -275,25 +281,151 @@ class MemPalaceProvider(MemoryProvider):
 
         return results
 
+    # -- Semantic gate thresholds --
+    # Core categories bypass the gate (always stored to "shared" wing)
+    _CORE_CATEGORIES = frozenset({"location", "identity", "personal"})
+    # Cold start: how many memories a wing needs before switching from soul→memory reference
+    _COLD_START_THRESHOLD = 5
+    # Cosine distance threshold for relevance (lower = more similar)
+    _RELEVANCE_MAX_DISTANCE = 0.55
+
+    def _get_wing_memory_count(self, wing: str) -> int:
+        """Count existing drawers in a wing."""
+        try:
+            col = self._get_collection()
+            if col is None:
+                return 0
+            result = col.get(where={"wing": wing}, include=[])
+            return len(result.get("ids", []))
+        except Exception:
+            return 0
+
+    def _compute_soul_embedding(self) -> Optional[List[float]]:
+        """Compute and cache the embedding for soul content."""
+        if self._soul_embedding is not None:
+            return self._soul_embedding
+        if not self._soul_content:
+            return None
+        try:
+            col = self._get_collection()
+            if col is None:
+                return None
+            # Use ChromaDB's embedding function to embed the soul
+            ef = col._embedding_function
+            if ef is None:
+                return None
+            embeddings = ef([self._soul_content])
+            if embeddings and len(embeddings) > 0:
+                self._soul_embedding = embeddings[0]
+                return self._soul_embedding
+        except Exception as e:
+            logger.debug("Soul embedding failed: %s", e)
+        return None
+
+    def _is_fact_relevant(self, fact_content: str, wing: str) -> bool:
+        """Check if a detected fact is semantically relevant to the wing.
+
+        Two-phase approach:
+        1. Mature wing (≥5 memories): compare against existing memories
+        2. Cold start (<5 memories): compare against soul content
+
+        Returns True if relevant (should store), False if irrelevant (skip).
+        """
+        col = self._get_collection()
+        if col is None:
+            return True  # No collection → allow everything (graceful degradation)
+
+        wing_count = self._get_wing_memory_count(wing)
+
+        if wing_count >= self._COLD_START_THRESHOLD:
+            # Phase 1: Compare against existing wing memories
+            try:
+                result = col.query(
+                    query_texts=[fact_content],
+                    n_results=min(3, wing_count),
+                    where={"wing": wing},
+                    include=["distances"],
+                )
+                if result and result.get("distances") and result["distances"][0]:
+                    min_distance = min(result["distances"][0])
+                    if min_distance <= self._RELEVANCE_MAX_DISTANCE:
+                        return True
+                    logger.debug(
+                        "Semantic gate: fact not relevant to wing '%s' (min_dist=%.3f): %s",
+                        wing, min_distance, fact_content[:50],
+                    )
+                    return False
+            except Exception as e:
+                logger.debug("Semantic gate query failed: %s", e)
+                return True  # Graceful degradation
+        else:
+            # Phase 2: Cold start — compare against soul content
+            soul_emb = self._compute_soul_embedding()
+            if soul_emb is None:
+                return True  # No soul → allow everything (bootstrap)
+            try:
+                # Embed the fact and compute cosine distance to soul
+                ef = col._embedding_function
+                if ef is None:
+                    return True
+                fact_emb = ef([fact_content])
+                if not fact_emb or len(fact_emb) == 0:
+                    return True
+                # Cosine distance = 1 - cosine similarity
+                import numpy as np
+                a = np.array(soul_emb)
+                b = np.array(fact_emb[0])
+                norm_a = np.linalg.norm(a)
+                norm_b = np.linalg.norm(b)
+                if norm_a == 0 or norm_b == 0:
+                    return True
+                cosine_sim = np.dot(a, b) / (norm_a * norm_b)
+                cosine_dist = 1.0 - cosine_sim
+                if cosine_dist <= self._RELEVANCE_MAX_DISTANCE:
+                    return True
+                logger.debug(
+                    "Semantic gate (cold start): fact not relevant to soul (dist=%.3f): %s",
+                    cosine_dist, fact_content[:50],
+                )
+                return False
+            except Exception as e:
+                logger.debug("Semantic gate cold start failed: %s", e)
+                return True
+
+        return True  # Default: allow
+
     def _auto_mine_facts(self, user_content: str) -> None:
-        """Background thread: detect and save personal facts."""
+        """Background thread: detect and save personal facts with semantic gate."""
         facts = self._detect_personal_facts(user_content)
         if not facts:
             return
 
         wing = self._wing or "shared"
+
         for fact in facts:
             try:
+                fact_wing = wing
+                fact_content = fact["content"]
+                category = fact["category"]
+
+                # Core facts (location, identity, personal) always go to shared
+                if category in self._CORE_CATEGORIES:
+                    fact_wing = "shared"
+                else:
+                    # Semantic gate: is this fact relevant to this wing?
+                    if not self._is_fact_relevant(fact_content, wing):
+                        continue  # Skip irrelevant fact
+
                 drawer_id, action = self._add_drawer(
-                    content=fact["content"],
-                    wing=wing,
-                    room=fact["category"],
+                    content=fact_content,
+                    wing=fact_wing,
+                    room=category,
                     importance=4.0,  # Personal facts are high-importance
                 )
                 if drawer_id:
                     logger.info(
-                        "MemPalace auto-mine: %s '%s' as %s [%s]",
-                        action, fact["content"][:60], fact["category"], drawer_id,
+                        "MemPalace auto-mine: %s '%s' as %s [%s] wing=%s",
+                        action, fact_content[:60], category, drawer_id, fact_wing,
                     )
             except Exception as e:
                 logger.debug("Auto-mine fact failed: %s", e)
