@@ -98,9 +98,9 @@ class TestDispatchCrossChannelImportError:
 
 class TestDispatchCrossChannelHappyPath:
     def test_calls_inject_with_correct_args(self):
-        """dispatch_cross_channel passes all args to runner.inject_cross_channel_message."""
+        """dispatch_cross_channel passes all args to inject_cross_channel_message."""
         runner = _make_runner()
-        runner.inject_cross_channel_message = AsyncMock(return_value={
+        mock_inject = AsyncMock(return_value={
             "success": True,
             "platform": "discord",
             "chat_id": "999",
@@ -108,6 +108,7 @@ class TestDispatchCrossChannelHappyPath:
         })
 
         with patch("gateway.run.get_gateway_runner", return_value=runner), \
+             patch("gateway.extensions.cross_channel.inject_cross_channel_message", mock_inject), \
              patch("model_tools._run_async", side_effect=_run_async_immediately):
             from gateway.extensions.cross_channel import dispatch_cross_channel
             result = json.loads(
@@ -123,7 +124,8 @@ class TestDispatchCrossChannelHappyPath:
 
         assert result["success"] is True
         assert result["triggered_agent"] is True
-        runner.inject_cross_channel_message.assert_awaited_once_with(
+        mock_inject.assert_awaited_once_with(
+            adapters=runner.adapters,
             target_platform="discord",
             target_chat_id="999",
             text="Research this topic",
@@ -135,9 +137,10 @@ class TestDispatchCrossChannelHappyPath:
     def test_returns_error_on_exception(self):
         """dispatch_cross_channel returns error dict on unexpected exception."""
         runner = _make_runner()
-        runner.inject_cross_channel_message = AsyncMock(side_effect=RuntimeError("boom"))
+        mock_inject = AsyncMock(side_effect=RuntimeError("boom"))
 
         with patch("gateway.run.get_gateway_runner", return_value=runner), \
+             patch("gateway.extensions.cross_channel.inject_cross_channel_message", mock_inject), \
              patch("model_tools._run_async", side_effect=_run_async_immediately):
             from gateway.extensions.cross_channel import dispatch_cross_channel
             result = json.loads(

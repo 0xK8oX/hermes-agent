@@ -32,9 +32,89 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Optional
+from typing import Dict, Optional
+from gateway.platforms.base import MessageEvent, MessageType, SessionSource
 
 logger = logging.getLogger(__name__)
+
+
+async def inject_cross_channel_message(
+    adapters: dict,
+    target_platform: str,
+    target_chat_id: str,
+    text: str,
+    source_session_key: str = "",
+    source_user_name: str = "System",
+    thread_id: str = None,
+) -> dict:
+    """Inject a synthetic message into a target channel's agent pipeline.
+
+    Used when ``trigger_agent=true`` in cross-channel dispatch.
+    Creates a synthetic MessageEvent with ``internal=True`` (bypasses auth)
+    and feeds it through the target channel's adapter into the full
+    message-processing pipeline — so the target agent processes it with
+    its own soul, model, and memory scope.
+
+    Args:
+        adapters: Platform adapter dict from the gateway runner.
+        target_platform: Platform name string (e.g. "discord").
+        target_chat_id: Target channel/chat ID (numeric string).
+        text: The message text to inject.
+        source_session_key: The originating session key (for mirror-back).
+        source_user_name: Display name for the synthetic event source.
+        thread_id: Optional thread ID within the target channel.
+
+    Returns:
+        Dict with ``success`` and details, or ``error`` on failure.
+    """
+    from gateway.config import Platform
+
+    # Resolve platform enum
+    platform_map = {p.value: p for p in Platform}
+    platform = platform_map.get(target_platform)
+    if not platform:
+        return {"error": f"Unknown platform: {target_platform}"}
+
+    adapter = adapters.get(platform)
+    if not adapter:
+        return {"error": f"No adapter connected for {target_platform}"}
+
+    try:
+        # Build a synthetic SessionSource for the target channel
+        source = SessionSource(
+            platform=platform,
+            chat_id=str(target_chat_id),
+            chat_type="group",
+            user_id="cross_channel",
+            user_name=source_user_name,
+            thread_id=thread_id or "",
+        )
+
+        event = MessageEvent(
+            text=text,
+            message_type=MessageType.TEXT,
+            source=source,
+            internal=True,  # Bypass user authorization
+            extra={
+                "cross_channel": True,
+                "source_session_key": source_session_key,
+            },
+        )
+
+        logger.info(
+            "[CrossChannel] Injecting into %s:%s (thread=%s) from %s",
+            target_platform, target_chat_id, thread_id, source_session_key,
+        )
+        await adapter.handle_message(event)
+        return {
+            "success": True,
+            "platform": target_platform,
+            "chat_id": target_chat_id,
+            "triggered_agent": True,
+        }
+    except Exception as e:
+        logger.error("[CrossChannel] Injection error: %s", e)
+        return {"error": str(e)}
 
 
 def dispatch_cross_channel(
@@ -75,7 +155,8 @@ def dispatch_cross_channel(
     try:
         from model_tools import _run_async
         result = _run_async(
-            runner.inject_cross_channel_message(
+            inject_cross_channel_message(
+                adapters=runner.adapters,
                 target_platform=platform,
                 target_chat_id=chat_id,
                 text=text,

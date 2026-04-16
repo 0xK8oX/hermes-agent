@@ -5853,66 +5853,9 @@ class GatewayRunner:
         return f"Unknown personality: `{args}`\n\nAvailable: {available}"
 
     async def _handle_bind_command(self, event: MessageEvent) -> str:
-        """Handle /bind command — dynamically switch soul for current channel.
-
-        Supports:
-          /bind              — show current binding
-          /bind <soul_name>  — switch soul for this session
-          /bind --clear      — remove dynamic binding
-        """
-        from gateway.extensions.channel_binding import (
-            _session_souls, _session_bindings, _session_soul_names,
-            _session_model_overrides, _apply_binding, _load_soul_content,
-        )
-        from gateway.extensions import fire_hooks_first
-
-        args = event.get_command_args().strip()
-        source = event.source
-        session_entry = self.session_store.get_or_create_session(source)
-        session_key = session_entry.session_id or source
-
-        # /bind --clear
-        if args == "--clear":
-            _session_souls.pop(session_key, None)
-            _session_bindings.pop(session_key, None)
-            _session_soul_names.pop(session_key, None)
-            _session_model_overrides.pop(session_key, None)
-            return "🔓 Soul binding cleared — using default personality.\n_(takes effect on next message)_"
-
-        # /bind <soul_name>
-        if args:
-            soul_name = args.lower().strip()
-            content = _load_soul_content(soul_name)
-            if not content:
-                # List available souls as hint
-                try:
-                    from hermes_constants import get_hermes_home
-                    souls_dir = get_hermes_home() / "souls"
-                except ImportError:
-                    from pathlib import Path
-                    souls_dir = Path.home() / ".hermes" / "souls"
-                available = []
-                if souls_dir.exists():
-                    available = sorted(p.stem for p in souls_dir.glob("*.md"))
-                soul_list = ", ".join(f"`{s}`" for s in available) if available else "(none found)"
-                return f"⚠️ Soul `{soul_name}` not found in ~/.hermes/souls/\n\nAvailable: {soul_list}"
-
-            # Apply the binding (soul only, no model override for dynamic bind)
-            binding = {"soul": soul_name}
-            _apply_binding(session_key, binding)
-            return f"🎭 Soul set to **{soul_name}** for this session.\n_(takes effect on next message)_"
-
-        # /bind (no args) — show current binding
-        current_soul = _session_soul_names.get(session_key)
-        current_model = fire_hooks_first("get_model_override", session_key)
-        if not current_soul:
-            return "No soul binding active for this session.\n\nUsage: `/bind <soul_name>` or `/bind --clear`"
-
-        lines = [f"🎭 **Current binding:** `{current_soul}`"]
-        if current_model:
-            lines.append(f"🤖 Model: `{current_model.get('model', 'default')}`")
-        lines.append("\nUsage: `/bind <soul_name>` to switch, `/bind --clear` to remove")
-        return "\n".join(lines)
+        """Delegate to channel_binding extension's /bind handler."""
+        from gateway.extensions.channel_binding import handle_bind_command
+        return await handle_bind_command(self.session_store, event)
     
     async def _handle_retry_command(self, event: MessageEvent) -> str:
         """Handle /retry command - re-send the last user message."""
@@ -8469,74 +8412,17 @@ class GatewayRunner:
         source_user_name: str = "System",
         thread_id: str = None,
     ) -> dict:
-        """Inject a synthetic message into a target channel's agent pipeline.
-
-        Used by the cross_channel extension when ``trigger_agent=true``.
-        Creates a synthetic MessageEvent with ``internal=True`` (bypasses auth)
-        and feeds it through the target channel's adapter into the full
-        message-processing pipeline — so the target agent processes it with
-        its own soul, model, and memory scope.
-
-        Args:
-            target_platform: Platform name string (e.g. "discord").
-            target_chat_id: Target channel/chat ID (numeric string).
-            text: The message text to inject.
-            source_session_key: The originating session key (for mirror-back).
-            source_user_name: Display name for the synthetic event source.
-            thread_id: Optional thread ID within the target channel.
-
-        Returns:
-            Dict with ``success`` and details, or ``error`` on failure.
-        """
-        from gateway.config import Platform
-        from gateway.platforms.base import MessageEvent, MessageType, SessionSource
-
-        # Resolve platform enum
-        platform_map = {p.value: p for p in Platform}
-        platform = platform_map.get(target_platform)
-        if not platform:
-            return {"error": f"Unknown platform: {target_platform}"}
-
-        adapter = self.adapters.get(platform)
-        if not adapter:
-            return {"error": f"No adapter connected for {target_platform}"}
-
-        try:
-            # Build a synthetic SessionSource for the target channel
-            source = SessionSource(
-                platform=platform,
-                chat_id=str(target_chat_id),
-                chat_type="group",
-                user_id="cross_channel",
-                user_name=source_user_name,
-                thread_id=thread_id or "",
-            )
-
-            event = MessageEvent(
-                text=text,
-                message_type=MessageType.TEXT,
-                source=source,
-                internal=True,  # Bypass user authorization
-                extra={
-                    "cross_channel": True,
-                    "source_session_key": source_session_key,
-                },
-            )
-
-            logger.info(
-                "[CrossChannel] Injecting into %s:%s (thread=%s) from %s",
-                target_platform, target_chat_id, thread_id, source_session_key,
-            )
-            await adapter.handle_message(event)
-            return {
-                "success": True,
-                "platform": target_platform,
-                "chat_id": target_chat_id,
-                "triggered_agent": True,
-            }
-        except Exception as e:
-            logger.error("[CrossChannel] Injection error: %s", e)
-            return {"error": str(e)}
+        """Delegate to cross_channel extension's implementation."""
+        from gateway.extensions.cross_channel import inject_cross_channel_message as _inject
+        return await _inject(
+            adapters=self.adapters,
+            target_platform=target_platform,
+            target_chat_id=target_chat_id,
+            text=text,
+            source_session_key=source_session_key,
+            source_user_name=source_user_name,
+            thread_id=thread_id,
+        )
 
     async def _run_process_watcher(self, watcher: dict) -> None:
         """

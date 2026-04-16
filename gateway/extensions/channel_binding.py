@@ -650,3 +650,67 @@ register_hook("get_memory_scope", _get_memory_scope)
 
 # Run startup validation
 _validate_bindings()
+
+
+# ---------------------------------------------------------------------------
+# /bind command handler — extracted from gateway/run.py to reduce pollution
+# ---------------------------------------------------------------------------
+
+async def handle_bind_command(session_store, event) -> str:
+    """Handle /bind command — dynamically switch soul for current channel.
+
+    Supports:
+      /bind              — show current binding
+      /bind <soul_name>  — switch soul for this session
+      /bind --clear      — remove dynamic binding
+    """
+    from gateway.extensions import fire_hooks_first
+
+    args = event.get_command_args().strip()
+    source = event.source
+    session_entry = session_store.get_or_create_session(source)
+    session_key = session_entry.session_id or source
+
+    # /bind --clear
+    if args == "--clear":
+        with _state_lock:
+            _session_souls.pop(session_key, None)
+            _session_bindings.pop(session_key, None)
+            _session_soul_names.pop(session_key, None)
+            _session_model_overrides.pop(session_key, None)
+        return "🔓 Soul binding cleared — using default personality.\n_(takes effect on next message)_"
+
+    # /bind <soul_name>
+    if args:
+        soul_name = args.lower().strip()
+        content = _load_soul_content(soul_name)
+        if not content:
+            # List available souls as hint
+            try:
+                from hermes_constants import get_hermes_home
+                souls_dir = get_hermes_home() / "souls"
+            except ImportError:
+                from pathlib import Path
+                souls_dir = Path.home() / ".hermes" / "souls"
+            available = []
+            if souls_dir.exists():
+                available = sorted(p.stem for p in souls_dir.glob("*.md"))
+            soul_list = ", ".join(f"`{s}`" for s in available) if available else "(none found)"
+            return f"⚠️ Soul `{soul_name}` not found in ~/.hermes/souls/\n\nAvailable: {soul_list}"
+
+        # Apply the binding (soul only, no model override for dynamic bind)
+        binding = {"soul": soul_name}
+        _apply_binding(session_key, binding)
+        return f"🎭 Soul set to **{soul_name}** for this session.\n_(takes effect on next message)_"
+
+    # /bind (no args) — show current binding
+    current_soul = _session_soul_names.get(session_key)
+    current_model = fire_hooks_first("get_model_override", session_key)
+    if not current_soul:
+        return "No soul binding active for this session.\n\nUsage: `/bind <soul_name>` or `/bind --clear`"
+
+    lines = [f"🎭 **Current binding:** `{current_soul}`"]
+    if current_model:
+        lines.append(f"🤖 Model: `{current_model.get('model', 'default')}`")
+    lines.append("\nUsage: `/bind <soul_name>` to switch, `/bind --clear` to remove")
+    return "\n".join(lines)
