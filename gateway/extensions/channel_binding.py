@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -49,7 +50,10 @@ logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Per-session state (module-level, keyed by session_key)
+# Protected by _state_lock for thread safety across async gateway + hooks.
 # ---------------------------------------------------------------------------
+
+_state_lock = threading.Lock()
 
 # soul content per session: {session_key: str}
 _session_souls: Dict[str, str] = {}
@@ -137,6 +141,12 @@ def _on_new_session(session_key: str, event: Any) -> None:
 
 def _apply_binding(session_key: str, binding: dict) -> None:
     """Store soul + skills + model + memory_scope from a resolved binding dict."""
+    with _state_lock:
+        _apply_binding_unlocked(session_key, binding)
+
+
+def _apply_binding_unlocked(session_key: str, binding: dict) -> None:
+    """Internal: mutate session state (caller must hold _state_lock)."""
     soul_name = binding.get("soul")
     model = binding.get("model")
     skills = binding.get("skills")
@@ -325,47 +335,51 @@ def _on_session_reset(session_key: str) -> None:
     global _CONFIG_BINDINGS_CACHE
     _CONFIG_BINDINGS_CACHE = None
 
-    binding = _session_bindings.get(session_key)
-    if not binding:
-        return
+    with _state_lock:
+        binding = _session_bindings.get(session_key)
+        if not binding:
+            return
 
-    # Re-load soul from disk
-    soul_name = binding.get("soul")
-    if soul_name and isinstance(soul_name, str):
-        content = _load_soul_content(soul_name)
-        if content:
-            _session_souls[session_key] = content
+        # Re-load soul from disk
+        soul_name = binding.get("soul")
+        if soul_name and isinstance(soul_name, str):
+            content = _load_soul_content(soul_name)
+            if content:
+                _session_souls[session_key] = content
+                logger.info(
+                    "[ChannelBinding] /reset: restored soul '%s' for %s",
+                    soul_name, session_key[:30],
+                )
+
+        model_override = _session_model_overrides.get(session_key)
+        if model_override:
             logger.info(
-                "[ChannelBinding] /reset: restored soul '%s' for %s",
-                soul_name, session_key[:30],
+                "[ChannelBinding] /reset: keeping model '%s' for %s",
+                model_override.get("model"), session_key[:30],
             )
-
-    model_override = _session_model_overrides.get(session_key)
-    if model_override:
-        logger.info(
-            "[ChannelBinding] /reset: keeping model '%s' for %s",
-            model_override.get("model"), session_key[:30],
-        )
 
 
 def _on_session_cleanup(session_key: str) -> None:
     """Remove all per-session state for an expired session."""
-    _session_souls.pop(session_key, None)
-    _session_model_overrides.pop(session_key, None)
-    _session_soul_names.pop(session_key, None)
-    _session_bindings.pop(session_key, None)
-    _session_skills.pop(session_key, None)
-    _session_memory_scopes.pop(session_key, None)
+    with _state_lock:
+        _session_souls.pop(session_key, None)
+        _session_model_overrides.pop(session_key, None)
+        _session_soul_names.pop(session_key, None)
+        _session_bindings.pop(session_key, None)
+        _session_skills.pop(session_key, None)
+        _session_memory_scopes.pop(session_key, None)
 
 
 def _get_model_override(session_key: str) -> Optional[Dict[str, Optional[str]]]:
     """Return the channel binding model override for a session, or None."""
-    return _session_model_overrides.get(session_key)
+    with _state_lock:
+        return _session_model_overrides.get(session_key)
 
 
 def _get_ephemeral(session_key: str) -> Optional[str]:
     """Return the per-session soul override content, or None."""
-    return _session_souls.get(session_key)
+    with _state_lock:
+        return _session_souls.get(session_key)
 
 
 def _get_skills_override(session_key: str) -> Optional[List[str]]:
@@ -374,7 +388,8 @@ def _get_skills_override(session_key: str) -> Optional[List[str]]:
     Used by gateway/run.py to inject skills into new sessions.
     An empty list means "all skills" (God mode).
     """
-    return _session_skills.get(session_key)
+    with _state_lock:
+        return _session_skills.get(session_key)
 
 
 def _get_memory_scope(session_key: str) -> Optional[str]:
@@ -388,16 +403,18 @@ def _get_memory_scope(session_key: str) -> Optional[str]:
     Falls back to re-resolving from config if not cached (e.g. after
     process restart, where in-memory state is lost for existing sessions).
     """
-    scope = _session_memory_scopes.get(session_key)
-    if scope is not None:
-        return scope
+    with _state_lock:
+        scope = _session_memory_scopes.get(session_key)
+        if scope is not None:
+            return scope
 
-    # Fallback: re-resolve binding from session key + config
+    # Fallback: re-resolve binding from session key + config (outside lock)
     binding = _resolve_binding_from_session_key(session_key)
     if binding and isinstance(binding, dict):
         memory_scope = binding.get("memory_scope")
         if memory_scope and isinstance(memory_scope, str):
-            _session_memory_scopes[session_key] = memory_scope
+            with _state_lock:
+                _session_memory_scopes[session_key] = memory_scope
             logger.info(
                 "[ChannelBinding] Memory scope '%s' re-resolved for session %s",
                 memory_scope, session_key[:30],

@@ -125,6 +125,9 @@ class MemoryStore:
         self._memory_dirs: Optional[List[Path]] = (
             [Path(d) for d in memory_dirs] if memory_dirs else None
         )
+        # Cache for _global_entries() — invalidated on _reload_target()
+        self._global_cache: Dict[str, List[str]] = {}
+        self._global_sets: Dict[str, set] = {}
         # Frozen snapshot for system prompt -- set once at load_from_disk()
         self._system_prompt_snapshot: Dict[str, str] = {"memory": "", "user": ""}
 
@@ -233,15 +236,28 @@ class MemoryStore:
             fresh = self._read_file(self._path_for(target))
             fresh = list(dict.fromkeys(fresh))  # deduplicate
         self._set_entries(target, fresh)
+        # Invalidate cached global entries when state is reloaded
+        self._global_cache = {}
+        self._global_sets = {}
 
     def _global_entries(self, target: str) -> List[str]:
-        """Read entries from global dir only (to subtract from save)."""
+        """Read entries from global dir only (to subtract from save).
+
+        Results are cached per target to avoid repeated disk reads
+        during mutations (scan_and_replace, scan_and_remove, save_to_disk).
+        Cache is invalidated on _reload_target.
+        """
         if not self._memory_dirs or len(self._memory_dirs) < 2:
             return []
+        cached = self._global_cache.get(target)
+        if cached is not None:
+            return cached
         fname = "USER.md" if target == "user" else "MEMORY.md"
         # First dir in _memory_dirs is always _global/
         global_dir = self._memory_dirs[0]
-        return self._read_file(Path(global_dir) / fname)
+        entries = self._read_file(Path(global_dir) / fname)
+        self._global_cache[target] = entries
+        return entries
 
     def _is_global_entry(self, target: str, entry: str) -> bool:
         """Check if an entry originated from the global directory.
@@ -251,7 +267,12 @@ class MemoryStore:
         """
         if not self._memory_dirs or len(self._memory_dirs) < 2:
             return False  # Not in scoped mode — all entries are fair game
-        return entry in self._global_entries(target)
+        # Use set for O(1) membership check instead of linear scan
+        global_set = self._global_sets.get(target)
+        if global_set is None:
+            global_set = set(self._global_entries(target))
+            self._global_sets[target] = global_set
+        return entry in global_set
 
     def save_to_disk(self, target: str):
         """Persist entries to the appropriate file. Called after every mutation.

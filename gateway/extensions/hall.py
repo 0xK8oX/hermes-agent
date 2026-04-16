@@ -38,6 +38,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -53,6 +54,11 @@ logger = logging.getLogger(__name__)
 
 _MAX_HALL_SIZE = 10_000  # max entries before auto-purge
 _PURGE_OLDER_THAN_DAYS = 30
+
+# Module-level lock for thread-safe JSONL access.
+# Gateway handles multiple platforms concurrently — without this,
+# concurrent hall_send / hall_read / hall_mark_read can corrupt the file.
+_hall_lock = threading.Lock()
 
 
 def _hall_path() -> Path:
@@ -152,8 +158,9 @@ def hall_send(
     }
 
     p = _ensure_hall()
-    with open(p, "a", encoding="utf-8") as f:
-        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    with _hall_lock:
+        with open(p, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
     logger.info(
         "[Hall] %s → %s: %s (priority=%s)",
@@ -176,7 +183,8 @@ def hall_read(soul: str, mark_read: bool = True) -> List[dict]:
         return []
 
     soul = soul.lower().strip()
-    entries = _read_all_entries()
+    with _hall_lock:
+        entries = _read_all_entries()
     if not entries:
         return []
 
@@ -192,7 +200,8 @@ def hall_read(soul: str, mark_read: bool = True) -> List[dict]:
                 modified = True
 
     if modified:
-        _write_all_entries(entries)
+        with _hall_lock:
+            _write_all_entries(entries)
 
     return unread
 
@@ -207,7 +216,9 @@ def hall_list(soul: str = None, limit: int = 20) -> List[dict]:
     Returns:
         List of message dicts (newest first).
     """
-    entries = _read_all_entries()
+    entries: List[dict]
+    with _hall_lock:
+        entries = _read_all_entries()
     if soul:
         soul = soul.lower().strip()
         entries = [
@@ -229,7 +240,8 @@ def hall_mark_read(msg_id: str, soul: str) -> bool:
         return False
 
     soul = soul.lower().strip()
-    entries = _read_all_entries()
+    with _hall_lock:
+        entries = _read_all_entries()
     found = False
     for entry in entries:
         if str(entry.get("id")) == str(msg_id):
@@ -239,7 +251,8 @@ def hall_mark_read(msg_id: str, soul: str) -> bool:
             break
 
     if found:
-        _write_all_entries(entries)
+        with _hall_lock:
+            _write_all_entries(entries)
     return found
 
 
@@ -253,7 +266,8 @@ def hall_clear(soul: str = None, older_than_days: int = _PURGE_OLDER_THAN_DAYS) 
     Returns:
         Number of messages removed.
     """
-    entries = _read_all_entries()
+    with _hall_lock:
+        entries = _read_all_entries()
     if not entries:
         return 0
 
@@ -277,7 +291,8 @@ def hall_clear(soul: str = None, older_than_days: int = _PURGE_OLDER_THAN_DAYS) 
 
     removed = original_count - len(filtered)
     if removed:
-        _write_all_entries(filtered)
+        with _hall_lock:
+            _write_all_entries(filtered)
         logger.info("[Hall] Purged %d old messages", removed)
     return removed
 
