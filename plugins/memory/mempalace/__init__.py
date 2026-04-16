@@ -37,11 +37,12 @@ import hashlib
 import json
 import logging
 import os
+import re
 import threading
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from agent.memory_provider import MemoryProvider
 from plugins.memory.mempalace.config import MemPalaceConfig
@@ -200,15 +201,115 @@ class MemPalaceProvider(MemoryProvider):
             )
             t.start()
 
+    # -- Auto-mine personal facts ------------------------------------------
+    # Lightweight regex-based detector for memorable personal statements.
+    # Runs in sync_turn after each completed turn; matched facts are auto-saved
+    # to MemPalace without requiring the LLM to call mempalace_add explicitly.
+
+    _PERSONAL_FACT_PATTERNS: List[Tuple[str, re.Pattern]] = None  # lazy init
+
+    @classmethod
+    def _get_fact_patterns(cls) -> List[Tuple[str, re.Pattern]]:
+        """Compile and cache personal-fact detection patterns (ZH + EN)."""
+        if cls._PERSONAL_FACT_PATTERNS is not None:
+            return cls._PERSONAL_FACT_PATTERNS
+
+        raw = [
+            # --- Location ---
+            ("location", r"(?:我住|我住在|我住在|我住喺|我係住|我搬咗去|我搬去|我搬了|我搬到)"),
+            ("location", r"(?:I live in|I'm based in|I'm from|I moved to|I reside in)"),
+            # --- Name / Identity ---
+            ("identity", r"(?:我叫|我的名字是|我的名是|我係)"),
+            ("identity", r"(?:My name is|I'm called|Call me|I go by)"),
+            # --- Company / Work ---
+            ("work", r"(?:我的公司|我做|我在.*工作|我在.*上班|我經營|我的職業)"),
+            ("work", r"(?:I work at|I work for|My company|I run|I founded|My role)"),
+            # --- Preferences (strong) ---
+            ("preference", r"(?:我prefer|我偏好|我鍾意|我喜歡|我討厭|我唔鍾意|我唔喜歡|我prefer)"),
+            ("preference", r"(?:I prefer|I like to|I hate|I don't like|always use|never use)"),
+            # --- Tech choices ---
+            ("preference", r"(?:用\s*\w+\s*(?:寫|做|開發|build)|我用\w+|我的stack|我的tech stack)"),
+            # --- Age / Family ---
+            ("personal", r"(?:我\d+歲|我的年紀|我老婆|我老公|我的另一半|我的伴侶|我子女|我小朋友)"),
+            ("personal", r"(?:I'm \d+|my wife|my husband|my partner|my kids|my children)"),
+            # --- Constraints / Rules ---
+            ("constraint", r"(?:我唔可以|我不能|我必須|我的要求是|一定要|唔好|不要)"),
+            ("constraint", r"(?:I can't|I must|I need|I require|make sure|don't ever)"),
+        ]
+
+        cls._PERSONAL_FACT_PATTERNS = [
+            (cat, re.compile(pat, re.IGNORECASE)) for cat, pat in raw
+        ]
+        return cls._PERSONAL_FACT_PATTERNS
+
+    def _detect_personal_facts(self, text: str) -> List[Dict[str, str]]:
+        """Detect memorable personal statements in user text.
+
+        Returns list of dicts: {"content": str, "category": str}.
+        Only returns the matching sentence, not the whole text.
+        """
+        if not text or len(text.strip()) < 4:
+            return []
+
+        # Split into sentences for more targeted extraction
+        sentences = re.split(r'[。！？\n.!?]+', text)
+        results = []
+        seen_cats = set()
+
+        for sentence in sentences:
+            sentence = sentence.strip()
+            if len(sentence) < 4:
+                continue
+
+            for category, pattern in self._get_fact_patterns():
+                if category in seen_cats:
+                    continue  # One fact per category per turn
+                m = pattern.search(sentence)
+                if m:
+                    results.append({
+                        "content": sentence,
+                        "category": category,
+                    })
+                    seen_cats.add(category)
+                    break  # One category per sentence
+
+        return results
+
+    def _auto_mine_facts(self, user_content: str) -> None:
+        """Background thread: detect and save personal facts."""
+        facts = self._detect_personal_facts(user_content)
+        if not facts:
+            return
+
+        wing = self._wing or "shared"
+        for fact in facts:
+            try:
+                drawer_id, action = self._add_drawer(
+                    content=fact["content"],
+                    wing=wing,
+                    room=fact["category"],
+                    importance=4.0,  # Personal facts are high-importance
+                )
+                if drawer_id:
+                    logger.info(
+                        "MemPalace auto-mine: %s '%s' as %s [%s]",
+                        action, fact["content"][:60], fact["category"], drawer_id,
+                    )
+            except Exception as e:
+                logger.debug("Auto-mine fact failed: %s", e)
+
     def sync_turn(self, user_content: str, assistant_content: str, *,
                   session_id: str = "") -> None:
-        """Record turn for potential mining. Non-blocking."""
+        """Record turn and auto-mine personal facts. Non-blocking."""
         if self._cron_skipped or not self._initialized:
             return
-        # We don't auto-mine every turn (too expensive).  The user can
-        # explicitly mine via the CLI or the mempalace_mine tool.
-        # But we track the turn count.
         self._turn_number += 1
+        # Auto-mine in background thread so it never blocks the response
+        if user_content:
+            t = threading.Thread(
+                target=self._auto_mine_facts, args=(user_content,), daemon=True,
+            )
+            t.start()
 
     def on_turn_start(self, turn_number: int, message: str, **kwargs) -> None:
         """Track turn count for cadence."""
