@@ -19,6 +19,17 @@ Config format (in config.yaml, under {platform}.extra):
         api_key: "${API_KEY}"                    # optional, env-var expanded
         memory_scope: "dev"                      # scoped memory dir
 
+Supported platforms: Discord, Telegram, WhatsApp (and any future platform
+that routes through the gateway command dispatcher).
+
+Commands:
+    /bind              — show current binding
+    /bind <soul_name>  — switch soul for this session (session-only)
+    /bind save         — persist current binding to config.yaml
+    /bind list         — list all persisted bindings across all platforms
+    /bind unbind       — remove persisted binding for current channel + clear runtime
+    /bind --clear      — clear session binding only (no config change)
+
 Memory architecture:
     ~/.hermes/memories/
     ├── _global/     ← shared across all channels
@@ -653,6 +664,198 @@ _validate_bindings()
 
 
 # ---------------------------------------------------------------------------
+# Session key parsing helpers
+# ---------------------------------------------------------------------------
+
+def _parse_session_key(session_key: str) -> Optional[Dict[str, str]]:
+    """Extract platform and channel_id from a session key.
+
+    Session key format: ``agent:main:{platform}:{chat_type}:{chat_id}[:...]``
+
+    Returns dict with keys ``platform``, ``chat_type``, ``channel_id``,
+    or ``None`` if the key cannot be parsed.
+    """
+    if not session_key:
+        return None
+    parts = session_key.split(":")
+    if len(parts) < 5 or parts[0] != "agent":
+        return None
+    return {
+        "platform": parts[2],
+        "chat_type": parts[3],
+        "channel_id": parts[4] if len(parts) > 4 else None,
+    }
+
+
+def _get_config_path() -> Path:
+    """Resolve the path to config.yaml."""
+    try:
+        from hermes_constants import get_hermes_home
+        return get_hermes_home() / "config.yaml"
+    except ImportError:
+        return Path.home() / ".hermes" / "config.yaml"
+
+
+def _load_config_yaml() -> dict:
+    """Load config.yaml, returning empty dict on any error."""
+    import yaml
+    config_path = _get_config_path()
+    if not config_path.exists():
+        return {}
+    try:
+        return yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return {}
+
+
+def _save_binding_to_config(platform: str, channel_id: str, binding: dict) -> str | None:
+    """Persist a channel binding to config.yaml under the platform's extra section.
+
+    Writes atomically via temp-file + os.replace.  Returns an error message
+    on failure, or ``None`` on success.
+    """
+    import yaml
+    import shutil
+    from utils import atomic_yaml_write
+
+    config_path = _get_config_path()
+
+    # Load current config
+    config = _load_config_yaml()
+    if not config:
+        return "⚠️ config.yaml not found or empty — cannot save binding."
+
+    # Ensure platform section exists
+    if platform not in config or not isinstance(config.get(platform), dict):
+        config[platform] = {}
+
+    # Ensure extra section exists
+    if "extra" not in config[platform] or not isinstance(config[platform].get("extra"), dict):
+        config[platform]["extra"] = {}
+
+    bindings = config[platform]["extra"].get("channel_personality_bindings", [])
+    if not isinstance(bindings, list):
+        bindings = []
+
+    # Build the binding entry to save — only include non-None fields
+    entry: Dict[str, Any] = {"id": channel_id}
+    for key in ("soul", "model", "provider", "base_url", "api_key", "memory_scope"):
+        val = binding.get(key)
+        if val is not None:
+            entry[key] = val
+    skills = binding.get("skills")
+    if skills:
+        entry["skills"] = skills if isinstance(skills, list) else [skills]
+
+    # Replace existing entry for same channel_id, or append
+    replaced = False
+    for i, existing in enumerate(bindings):
+        if isinstance(existing, dict) and str(existing.get("id", "")) == channel_id:
+            bindings[i] = entry
+            replaced = True
+            break
+    if not replaced:
+        bindings.append(entry)
+
+    config[platform]["extra"]["channel_personality_bindings"] = bindings
+
+    # Atomic write
+    try:
+        atomic_yaml_write(config_path, config)
+    except Exception as e:
+        logger.error("[ChannelBinding] Failed to write config: %s", e)
+        return f"⚠️ Failed to save binding to config.yaml: {e}"
+
+    # Invalidate config cache so the new binding is picked up
+    global _CONFIG_BINDINGS_CACHE
+    _CONFIG_BINDINGS_CACHE = None
+
+    action = "Updated" if replaced else "Saved"
+    logger.info("[ChannelBinding] %s binding for %s:%s → %s", action, platform, channel_id, entry.get("soul"))
+    return None  # success
+
+
+def _remove_binding_from_config(platform: str, channel_id: str) -> str | None:
+    """Remove a persisted channel binding from config.yaml.
+
+    Returns an error message on failure, or ``None`` on success.
+    """
+    from utils import atomic_yaml_write
+
+    config_path = _get_config_path()
+    config = _load_config_yaml()
+    if not config:
+        return "⚠️ config.yaml not found or empty."
+
+    platform_cfg = config.get(platform)
+    if not isinstance(platform_cfg, dict):
+        return "⚠️ No config section found for platform '{platform}'."
+
+    extra = platform_cfg.get("extra")
+    if not isinstance(extra, dict):
+        return f"⚠️ No extra section found for platform '{platform}'."
+
+    bindings = extra.get("channel_personality_bindings", [])
+    if not isinstance(bindings, list) or not bindings:
+        return f"⚠️ No persisted bindings found for platform '{platform}'."
+
+    # Find and remove the matching entry
+    original_len = len(bindings)
+    bindings = [b for b in bindings if not (isinstance(b, dict) and str(b.get("id", "")) == channel_id)]
+
+    if len(bindings) == original_len:
+        return f"⚠️ No persisted binding found for channel `{channel_id}` on `{platform}`."
+
+    config[platform]["extra"]["channel_personality_bindings"] = bindings
+
+    try:
+        atomic_yaml_write(config_path, config)
+    except Exception as e:
+        logger.error("[ChannelBinding] Failed to write config during unbind: %s", e)
+        return f"⚠️ Failed to update config.yaml: {e}"
+
+    # Invalidate cache
+    global _CONFIG_BINDINGS_CACHE
+    _CONFIG_BINDINGS_CACHE = None
+
+    logger.info("[ChannelBinding] Removed binding for %s:%s", platform, channel_id)
+    return None  # success
+
+
+def _list_all_bindings() -> str:
+    """Return a formatted string listing all persisted bindings across all platforms."""
+    all_bindings = _get_all_platform_bindings()
+
+    if not all_bindings:
+        return "📭 No persisted channel bindings found in config.yaml.\n\nUse `/bind <soul>` then `/bind save` to create one."
+
+    lines = ["📋 **Persisted Channel Bindings:**\n"]
+    for platform, bindings in sorted(all_bindings.items()):
+        lines.append(f"**{platform.title()}:**")
+        for entry in bindings:
+            if not isinstance(entry, dict):
+                continue
+            chan_id = entry.get("id", "?")
+            soul = entry.get("soul", "—")
+            model = entry.get("model", "")
+            scope = entry.get("memory_scope", "")
+            skills = entry.get("skills", [])
+            detail = f"  • `{chan_id}` → soul: `{soul}`"
+            if model:
+                detail += f" | model: `{model}`"
+            if scope:
+                detail += f" | scope: `{scope}`"
+            if skills:
+                skill_names = skills if isinstance(skills, list) else [skills]
+                detail += f" | skills: {len(skill_names)}"
+            lines.append(detail)
+        lines.append("")
+
+    lines.append("_Use `/bind save` to persist the current session binding, `/bind unbind` to remove one._")
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # /bind command handler — extracted from gateway/run.py to reduce pollution
 # ---------------------------------------------------------------------------
 
@@ -661,8 +864,11 @@ async def handle_bind_command(session_store, event) -> str:
 
     Supports:
       /bind              — show current binding
-      /bind <soul_name>  — switch soul for this session
-      /bind --clear      — remove dynamic binding
+      /bind <soul_name>  — switch soul for this session (session-only)
+      /bind --clear      — remove dynamic binding (session-only)
+      /bind save         — persist current binding to config.yaml
+      /bind list         — list all persisted bindings across all platforms
+      /bind unbind       — remove persisted binding for current channel + clear runtime
     """
     from gateway.extensions import fire_hooks_first
 
@@ -670,6 +876,87 @@ async def handle_bind_command(session_store, event) -> str:
     source = event.source
     session_entry = session_store.get_or_create_session(source)
     session_key = session_entry.session_id or source
+    parsed = _parse_session_key(session_key)
+
+    # ── Subcommands ──────────────────────────────────────────────────────
+
+    # /bind list — list all persisted bindings across all platforms
+    if args == "list":
+        return _list_all_bindings()
+
+    # /bind save — persist current dynamic binding to config.yaml
+    if args == "save":
+        if not parsed or not parsed.get("channel_id"):
+            return "⚠️ Cannot determine channel ID from session — save is not available here."
+
+        platform = parsed["platform"]
+        channel_id = parsed["channel_id"]
+
+        with _state_lock:
+            current_binding = _session_bindings.get(session_key)
+            current_soul = _session_soul_names.get(session_key)
+            current_model_override = _session_model_overrides.get(session_key)
+            current_skills = _session_skills.get(session_key)
+            current_memory_scope = _session_memory_scopes.get(session_key)
+
+        if not current_soul:
+            return (
+                "⚠️ No active binding to save.\n\n"
+                "First set a soul with `/bind <soul_name>`, then use `/bind save` to persist it."
+            )
+
+        # Build the config entry from current session state
+        entry: Dict[str, Any] = {"soul": current_soul}
+        if current_model_override:
+            for key in ("model", "provider", "base_url", "api_key"):
+                val = current_model_override.get(key)
+                if val:
+                    entry[key] = val
+        if current_skills:
+            entry["skills"] = current_skills
+        if current_memory_scope:
+            entry["memory_scope"] = current_memory_scope
+
+        error = _save_binding_to_config(platform, channel_id, entry)
+        if error:
+            return error
+
+        return (
+            f"✅ Binding saved to config.yaml!\n"
+            f"Platform: `{platform}` | Channel: `{channel_id}` | Soul: `{current_soul}`\n"
+            f"_(persists across gateway restarts)_"
+        )
+
+    # /bind unbind — remove persisted binding + clear runtime
+    if args == "unbind":
+        if not parsed or not parsed.get("channel_id"):
+            return "⚠️ Cannot determine channel ID from session — unbind is not available here."
+
+        platform = parsed["platform"]
+        channel_id = parsed["channel_id"]
+
+        # Remove from config
+        error = _remove_binding_from_config(platform, channel_id)
+
+        # Always clear runtime state regardless of config result
+        with _state_lock:
+            _session_souls.pop(session_key, None)
+            _session_bindings.pop(session_key, None)
+            _session_soul_names.pop(session_key, None)
+            _session_model_overrides.pop(session_key, None)
+            _session_skills.pop(session_key, None)
+            _session_memory_scopes.pop(session_key, None)
+
+        if error:
+            return f"{error}\n🔓 Runtime binding cleared anyway — using default personality."
+
+        return (
+            f"🔓 Binding removed from config.yaml and cleared from session.\n"
+            f"Platform: `{platform}` | Channel: `{channel_id}`\n"
+            f"_(using default personality on next message)_"
+        )
+
+    # ── Legacy subcommands ───────────────────────────────────────────────
 
     # /bind --clear
     if args == "--clear":
@@ -678,10 +965,15 @@ async def handle_bind_command(session_store, event) -> str:
             _session_bindings.pop(session_key, None)
             _session_soul_names.pop(session_key, None)
             _session_model_overrides.pop(session_key, None)
+            _session_skills.pop(session_key, None)
+            _session_memory_scopes.pop(session_key, None)
         return "🔓 Soul binding cleared — using default personality.\n_(takes effect on next message)_"
 
     # /bind <soul_name>
     if args:
+        # Reject subcommand-like args to prevent confusion
+        if args in ("save", "list", "unbind", "--clear"):
+            pass  # already handled above; shouldn't reach here
         soul_name = args.lower().strip()
         content = _load_soul_content(soul_name)
         if not content:
@@ -701,16 +993,38 @@ async def handle_bind_command(session_store, event) -> str:
         # Apply the binding (soul only, no model override for dynamic bind)
         binding = {"soul": soul_name}
         _apply_binding(session_key, binding)
-        return f"🎭 Soul set to **{soul_name}** for this session.\n_(takes effect on next message)_"
+        return (
+            f"🎭 Soul set to **{soul_name}** for this session.\n"
+            f"_(takes effect on next message — use `/bind save` to persist)_"
+        )
 
     # /bind (no args) — show current binding
     current_soul = _session_soul_names.get(session_key)
     current_model = fire_hooks_first("get_model_override", session_key)
+
     if not current_soul:
-        return "No soul binding active for this session.\n\nUsage: `/bind <soul_name>` or `/bind --clear`"
+        return (
+            "No soul binding active for this session.\n\n"
+            "Usage:\n"
+            "  `/bind <soul_name>` — switch soul (session-only)\n"
+            "  `/bind save` — persist current binding to config\n"
+            "  `/bind list` — show all persisted bindings\n"
+            "  `/bind unbind` — remove persisted + runtime binding\n"
+            "  `/bind --clear` — clear session binding only"
+        )
 
     lines = [f"🎭 **Current binding:** `{current_soul}`"]
     if current_model:
         lines.append(f"🤖 Model: `{current_model.get('model', 'default')}`")
-    lines.append("\nUsage: `/bind <soul_name>` to switch, `/bind --clear` to remove")
+    with _state_lock:
+        scope = _session_memory_scopes.get(session_key)
+        skills = _session_skills.get(session_key)
+    if scope:
+        lines.append(f"📂 Memory scope: `{scope}`")
+    if skills:
+        lines.append(f"🛠️ Skills: {', '.join(f'`{s}`' for s in skills)}")
+    lines.append(
+        "\nUsage: `/bind <soul>` switch | `/bind save` persist | "
+        "`/bind unbind` remove | `/bind --clear` session-only clear"
+    )
     return "\n".join(lines)

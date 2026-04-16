@@ -148,7 +148,8 @@ COMMAND_REGISTRY: list[CommandDef] = [
     CommandDef("plugins", "List installed plugins and their status",
               "Tools & Skills", cli_only=True),
     CommandDef("bind", "Switch soul personality for current channel",
-              "Tools & Skills", gateway_only=True, args_hint="[soul_name|--clear]"),
+              "Tools & Skills", gateway_only=True, args_hint="[soul_name|save|list|unbind|--clear]",
+              subcommands=("save", "list", "unbind", "--clear")),
 
     # Info
     CommandDef("commands", "Browse all commands and skills (paginated)", "Info",
