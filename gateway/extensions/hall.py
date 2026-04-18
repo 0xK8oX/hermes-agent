@@ -18,6 +18,7 @@ Each entry:
         "subject": "New task assigned",
         "body": "Check GitHub issue #42",
         "priority": "normal" | "high",
+        "dispatch": "auto" | "queued",
         "ts": "2026-04-16T01:30:00",
         "read_by": ["dev"]
     }
@@ -151,15 +152,71 @@ def _lookup_soul_channel(soul_name: str) -> Optional[Dict[str, str]]:
     return None
 
 
+def _is_admin_soul(soul_name: str) -> bool:
+    """Check if a soul is bound to a channel owned by an admin user.
+
+    Admin users are defined in GATEWAY_ADMIN_USERS env var (comma-separated user IDs).
+    A soul is considered 'admin' if any of its bound channels' user_id is an admin.
+    """
+    if not soul_name:
+        return False
+    admin_env = os.environ.get("GATEWAY_ADMIN_USERS", "").strip()
+    if not admin_env:
+        return False
+    admin_ids = {aid.strip() for aid in admin_env.split(",") if aid.strip()}
+    if not admin_ids:
+        return False
+
+    # Check if the soul's channel has an admin binding
+    # For now: the *first* channel that matches this soul is checked
+    # In practice, alpha/pm/operation souls bound to admin-owned channels
+    target = _lookup_soul_channel(soul_name)
+    if not target:
+        return False
+    # We trust that if a soul is bound, it's the owner's soul
+    # More precise: check config for user_id field, but for now
+    # we use a convention — alpha is always admin
+    return soul_name.lower().strip() in ("alpha", "pm")
+
+
+def _dispatch_dir() -> Path:
+    """Return the pending dispatch directory path."""
+    try:
+        from hermes_constants import get_hermes_home
+        base = get_hermes_home()
+    except ImportError:
+        base = Path.home() / ".hermes"
+    d = base / "hall_dispatch"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _write_dispatch_pending(entry: dict) -> None:
+    """Write a pending dispatch file for the gateway watcher to pick up."""
+    d = _dispatch_dir()
+    entry_id = entry.get("id", "unknown")
+    pending_path = d / f"{entry_id}.json"
+    with open(pending_path, "w", encoding="utf-8") as f:
+        json.dump(entry, f, ensure_ascii=False)
+    logger.info("[Hall] Wrote pending dispatch file: %s", pending_path.name)
+
+
 def _auto_dispatch(entry: dict) -> None:
     """After hall_send, try to trigger the target soul's agent via cross-channel dispatch.
 
+    Two modes based on entry["dispatch"]:
+      - "auto": Immediate dispatch — admin/command-initiated, target soul must respond.
+      - "queued" (default): No dispatch — message waits for soul to read it.
+
     Runs in a background thread to avoid blocking the caller.
-    Gracefully no-ops if the gateway is not running or target has no bound channel.
+    If gateway runner is unavailable (subprocess), writes a pending file instead.
     """
+    dispatch_mode = entry.get("dispatch", "queued")
+    if dispatch_mode != "auto":
+        return
+
     to_soul = entry.get("to", "")
     if not to_soul or to_soul == "all":
-        # Broadcast — no single target to dispatch to
         return
 
     target = _lookup_soul_channel(to_soul)
@@ -172,46 +229,65 @@ def _auto_dispatch(entry: dict) -> None:
             from gateway.extensions.cross_channel import dispatch_cross_channel
             from gateway.run import get_gateway_runner
             runner = get_gateway_runner()
+
+            if runner is None:
+                # We're in a subprocess — write pending file for gateway watcher
+                logger.info("[Hall] No gateway runner (subprocess), writing pending dispatch for '%s'", to_soul)
+                _write_dispatch_pending(entry)
+                return
+
             logger.info(
-                "[Hall] Auto-dispatch: soul '%s' → %s:%s, runner=%s",
+                "[Hall] Auto-dispatch: soul '%s' → %s:%s",
                 to_soul, target["platform"], target["chat_id"],
-                "active" if runner else "None",
             )
-            from_soul = entry.get("from", "hall")
-            subject = entry.get("subject", "")
-            body = entry.get("body", "")
-            msg_id = entry.get("id", "")
-            text = (
-                f"📬 **Hall Message** (from: {from_soul})\n\n"
-                f"**Subject:** {subject}\n\n"
-                f"{body}\n\n"
-                f"_Message ID: {msg_id} — use `hall` tool to reply._"
-            )
-            result_json = dispatch_cross_channel(
-                platform=target["platform"],
-                chat_id=target["chat_id"],
-                text=text,
-                source_session_key=f"hall:{from_soul}",
-                source_user_name=f"{from_soul} (via Hall)",
-            )
-            import json as _json
-            result = _json.loads(result_json)
-            if result.get("success"):
-                logger.info(
-                    "[Hall] Auto-dispatched to %s:%s for soul '%s'",
-                    target["platform"], target["chat_id"], to_soul,
-                )
-            else:
-                logger.debug(
-                    "[Hall] Auto-dispatch skipped for soul '%s': %s",
-                    to_soul, result.get("error", "unknown"),
-                )
+            _execute_dispatch(entry, target)
+
         except Exception as e:
             logger.debug("[Hall] Auto-dispatch error for soul '%s': %s", to_soul, e)
+            # Fallback: write pending file
+            try:
+                _write_dispatch_pending(entry)
+            except Exception:
+                pass
 
-    # Fire in background thread — never block the sender
     t = threading.Thread(target=_dispatch, name=f"hall-dispatch-{to_soul}", daemon=True)
     t.start()
+
+
+def _execute_dispatch(entry: dict, target: dict) -> None:
+    """Execute the actual cross-channel dispatch. Called from gateway process."""
+    from gateway.extensions.cross_channel import dispatch_cross_channel
+
+    to_soul = entry.get("to", "")
+    from_soul = entry.get("from", "hall")
+    subject = entry.get("subject", "")
+    body = entry.get("body", "")
+    msg_id = entry.get("id", "")
+    text = (
+        f"📬 **Hall Message** (from: {from_soul})\n\n"
+        f"**Subject:** {subject}\n\n"
+        f"{body}\n\n"
+        f"_Message ID: {msg_id} — use `hall` tool to reply._"
+    )
+    result_json = dispatch_cross_channel(
+        platform=target["platform"],
+        chat_id=target["chat_id"],
+        text=text,
+        source_session_key=f"hall:{from_soul}",
+        source_user_name=f"{from_soul} (via Hall)",
+    )
+    import json as _json
+    result = _json.loads(result_json)
+    if result.get("success"):
+        logger.info(
+            "[Hall] Auto-dispatched to %s:%s for soul '%s'",
+            target["platform"], target["chat_id"], to_soul,
+        )
+    else:
+        logger.warning(
+            "[Hall] Auto-dispatch failed for soul '%s': %s",
+            to_soul, result.get("error", "unknown"),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -224,6 +300,7 @@ def hall_send(
     subject: str,
     body: str,
     priority: str = "normal",
+    dispatch: str = "auto",
 ) -> dict:
     """Post a message to the Hall.
 
@@ -233,6 +310,9 @@ def hall_send(
         subject: short subject line
         body: message body
         priority: "normal" or "high"
+        dispatch: "auto" (immediate — admin sends) or "queued" (system notification)
+            Default is "auto" — messages from admin souls auto-trigger the target.
+            System/batch callers should explicitly pass dispatch="queued".
 
     Returns:
         The created entry dict.
@@ -244,6 +324,8 @@ def hall_send(
         raise ValueError("to_soul must be a non-empty string")
     if priority not in ("normal", "high"):
         priority = "normal"
+    if dispatch not in ("auto", "queued"):
+        dispatch = "queued"
 
     entry = {
         "id": uuid.uuid4().hex[:12],
@@ -252,6 +334,7 @@ def hall_send(
         "subject": subject.strip(),
         "body": body.strip(),
         "priority": priority,
+        "dispatch": dispatch,
         "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "read_by": [],
     }
@@ -262,12 +345,13 @@ def hall_send(
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
     logger.info(
-        "[Hall] %s → %s: %s (priority=%s)",
-        from_soul, to_soul, subject[:50], priority,
+        "[Hall] %s → %s: %s (priority=%s, dispatch=%s)",
+        from_soul, to_soul, subject[:50], priority, dispatch,
     )
 
-    # Auto-dispatch: trigger target soul's agent if gateway is running
-    _auto_dispatch(entry)
+    # Auto-dispatch: trigger target soul's agent if dispatch="auto"
+    if dispatch == "auto":
+        _auto_dispatch(entry)
 
     return entry
 

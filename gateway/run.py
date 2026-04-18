@@ -2237,6 +2237,11 @@ class GatewayRunner:
             )
         asyncio.create_task(self._platform_reconnect_watcher())
 
+        # Start hall pending dispatch watcher — picks up auto-dispatch requests
+        # written by subprocess callers (cron, agent tools) and executes them
+        # in the gateway process where cross-channel dispatch is available.
+        asyncio.create_task(self._hall_dispatch_watcher())
+
         logger.info("Press Ctrl+C to stop")
         
         return True
@@ -2520,6 +2525,66 @@ class GatewayRunner:
 
             # Check every 10 seconds for platforms that need reconnection
             for _ in range(10):
+                if not self._running:
+                    return
+                await asyncio.sleep(1)
+
+    async def _hall_dispatch_watcher(self, interval: int = 3) -> None:
+        """Background task that processes pending Hall auto-dispatch requests.
+
+        When ``hall_send(dispatch="auto")`` is called from a subprocess (cron,
+        agent tool), it writes a pending file to ``~/.hermes/hall_dispatch/``.
+        This watcher scans that directory and executes the dispatch inside the
+        gateway process where ``get_gateway_runner()`` is available.
+        """
+        await asyncio.sleep(15)  # initial delay — let the gateway fully start
+        logger.info("[Hall-Dispatch-Watcher] Started, scanning every %ds", interval)
+
+        while self._running:
+            try:
+                from gateway.extensions.hall import _dispatch_dir, _execute_dispatch, _lookup_soul_channel
+                dispatch_dir = _dispatch_dir()
+                pending_files = sorted(dispatch_dir.glob("*.json"))
+
+                for pf in pending_files:
+                    if not self._running:
+                        return
+                    try:
+                        import json as _json
+                        entry = _json.loads(pf.read_text(encoding="utf-8"))
+                        to_soul = entry.get("to", "")
+                        target = _lookup_soul_channel(to_soul)
+
+                        if target:
+                            logger.info(
+                                "[Hall-Dispatch-Watcher] Processing pending dispatch: %s → %s",
+                                entry.get("from", "?"), to_soul,
+                            )
+                            # Run dispatch in thread pool to avoid blocking event loop
+                            loop = asyncio.get_event_loop()
+                            await loop.run_in_executor(None, _execute_dispatch, entry, target)
+                        else:
+                            logger.warning(
+                                "[Hall-Dispatch-Watcher] No channel found for soul '%s', discarding",
+                                to_soul,
+                            )
+
+                        # Always remove the pending file after processing
+                        pf.unlink(missing_ok=True)
+
+                    except Exception as e:
+                        logger.error("[Hall-Dispatch-Watcher] Error processing %s: %s", pf.name, e)
+                        # Remove corrupted file to avoid retry loop
+                        try:
+                            pf.unlink(missing_ok=True)
+                        except Exception:
+                            pass
+
+            except Exception as e:
+                logger.error("[Hall-Dispatch-Watcher] Scan error: %s", e)
+
+            # Wait before next scan
+            for _ in range(interval):
                 if not self._running:
                     return
                 await asyncio.sleep(1)
@@ -5982,7 +6047,7 @@ class GatewayRunner:
     async def _handle_hall_send_command(self, event: MessageEvent) -> str:
         """Send a Hall message from the current soul to another soul."""
         from gateway.extensions.channel_binding import _session_soul_names, _ensure_binding_loaded
-        from gateway.extensions.hall import hall_send
+        from gateway.extensions.hall import hall_send, _is_admin_soul
 
         args = event.get_command_args().strip()
         if not args:
@@ -6008,10 +6073,17 @@ class GatewayRunner:
         _ensure_binding_loaded(session_key)
         from_soul = _session_soul_names.get(session_key, "hall")
 
+        # Admin souls get auto-dispatch (immediate), others get queued
+        dispatch_mode = "auto" if _is_admin_soul(from_soul) else "queued"
+
         try:
-            entry = hall_send(from_soul=from_soul, to_soul=to_soul, subject=subject, body=body)
+            entry = hall_send(
+                from_soul=from_soul, to_soul=to_soul, subject=subject,
+                body=body, dispatch=dispatch_mode,
+            )
+            dispatch_tag = "⚡ auto" if dispatch_mode == "auto" else "📋 queued"
             return (
-                f"✉️ Hall message sent!\n"
+                f"✉️ Hall message sent! ({dispatch_tag})\n"
                 f"From: {from_soul} → To: {to_soul}\n"
                 f"Subject: {subject or '(none)'}\n"
                 f"ID: {entry.get('id', '?')}"
@@ -6143,7 +6215,7 @@ class GatewayRunner:
         body = "\n".join(body_lines)
 
         try:
-            entry = hall_send(from_soul=from_soul, to_soul=manager_soul, subject=subject, body=body, priority="normal")
+            entry = hall_send(from_soul=from_soul, to_soul=manager_soul, subject=subject, body=body, priority="normal", dispatch="queued")
             return (
                 f"📋 Report sent!\n"
                 f"From: {from_soul} → To: {manager_soul}\n"
