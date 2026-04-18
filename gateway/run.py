@@ -2555,30 +2555,32 @@ class GatewayRunner:
                         to_soul = entry.get("to", "")
                         target = _lookup_soul_channel(to_soul)
 
-                        if target:
-                            logger.info(
-                                "[Hall-Dispatch-Watcher] Processing pending dispatch: %s → %s",
-                                entry.get("from", "?"), to_soul,
-                            )
-                            # Run dispatch in thread pool to avoid blocking event loop
-                            loop = asyncio.get_event_loop()
-                            await loop.run_in_executor(None, _execute_dispatch, entry, target)
-                        else:
+                        if not target:
                             logger.warning(
                                 "[Hall-Dispatch-Watcher] No channel found for soul '%s', discarding",
                                 to_soul,
                             )
+                            pf.unlink(missing_ok=True)
+                            continue
 
-                        # Always remove the pending file after processing
+                        logger.info(
+                            "[Hall-Dispatch-Watcher] Processing pending dispatch: %s → %s",
+                            entry.get("from", "?"), to_soul,
+                        )
+                        # Run dispatch in thread pool to avoid blocking event loop
+                        loop = asyncio.get_event_loop()
+                        await loop.run_in_executor(None, _execute_dispatch, entry, target)
+
+                        # Only remove on successful dispatch
+                        pf.unlink(missing_ok=True)
+
+                    except _json.JSONDecodeError as e:
+                        logger.error("[Hall-Dispatch-Watcher] Corrupted file %s: %s — discarding", pf.name, e)
                         pf.unlink(missing_ok=True)
 
                     except Exception as e:
-                        logger.error("[Hall-Dispatch-Watcher] Error processing %s: %s", pf.name, e)
-                        # Remove corrupted file to avoid retry loop
-                        try:
-                            pf.unlink(missing_ok=True)
-                        except Exception:
-                            pass
+                        logger.error("[Hall-Dispatch-Watcher] Dispatch failed for %s: %s — will retry", pf.name, e)
+                        # Keep file for retry on next scan
 
             except Exception as e:
                 logger.error("[Hall-Dispatch-Watcher] Scan error: %s", e)
@@ -3100,6 +3102,7 @@ class GatewayRunner:
         "profile", "yolo", "personality",
         "update", "debug", "reload-mcp", "sethome",
         "hall-send", "hall-read", "hall-status", "hall-report",
+        "reload",
     })
 
     def _is_admin_user(self, source: SessionSource) -> bool:
@@ -3366,6 +3369,12 @@ class GatewayRunner:
                 if not self._is_admin_user(source):
                     return "🔒 This command is admin-only. You don't have permission to use it."
                 return await self._handle_restart_command(event)
+
+            # /reload is admin-only and does NOT need to interrupt active agents.
+            if _cmd_def_inner and _cmd_def_inner.name == "reload":
+                if not self._is_admin_user(source):
+                    return "🔒 This command is admin-only. You don't have permission to use it."
+                return await self._handle_reload_command(event)
 
             # /stop must hard-kill the session when an agent is running.
             # A soft interrupt (agent.interrupt()) doesn't help when the agent
@@ -3727,6 +3736,9 @@ class GatewayRunner:
 
         if canonical == "reload-mcp":
             return await self._handle_reload_mcp_command(event)
+
+        if canonical == "reload":
+            return await self._handle_reload_command(event)
 
         if canonical == "approve":
             return await self._handle_approve_command(event)
@@ -4200,6 +4212,16 @@ class GatewayRunner:
 
             session_entry.was_auto_reset = False
             session_entry.auto_reset_reason = None
+
+        # Extension hook: load session checkpoint for continuity after restart
+        if getattr(session_entry, 'was_auto_reset', False) or _is_new_session:
+            try:
+                from gateway.extensions import fire_hooks_first
+                _checkpoint_ctx = fire_hooks_first("get_checkpoint", session_key)
+                if _checkpoint_ctx:
+                    context_prompt = _checkpoint_ctx + "\n\n" + context_prompt
+            except Exception:
+                pass
 
         # Auto-load skill(s) for topic/channel bindings (Telegram DM Topics,
         # Discord channel_skill_bindings).  Supports a single name or ordered list.
@@ -4884,6 +4906,19 @@ class GatewayRunner:
                 session_entry.session_key,
                 last_prompt_tokens=agent_result.get("last_prompt_tokens", 0),
             )
+
+            # Extension hook: save session checkpoint for continuity after restart
+            try:
+                from gateway.extensions import fire_hooks
+                fire_hooks(
+                    "save_checkpoint",
+                    session_key,
+                    session_entry.session_id,
+                    message_text[:500],
+                    (response or "")[:500],
+                )
+            except Exception:
+                pass
 
             # Auto voice reply: send TTS audio before the text response
             _already_sent = bool(agent_result.get("already_sent"))
@@ -7897,6 +7932,141 @@ class GatewayRunner:
         except Exception as e:
             logger.warning("MCP reload failed: %s", e)
             return f"❌ MCP reload failed: {e}"
+
+    # ------------------------------------------------------------------
+    # /reload — hot-reload config, souls, extensions, env
+    # ------------------------------------------------------------------
+
+    def _reload_env(self) -> tuple:
+        """Reload .env variables into the running process."""
+        try:
+            from hermes_cli.env_loader import load_hermes_dotenv
+            loaded = load_hermes_dotenv()
+            return (f"📝 .env ({len(loaded)} file(s))", None)
+        except Exception as e:
+            return ("", f"❌ .env: {e}")
+
+    def _reload_config(self) -> tuple:
+        """Reload all config.yaml values."""
+        try:
+            self._prefill_messages = self._load_prefill_messages()
+            self._ephemeral_system_prompt = self._load_ephemeral_system_prompt()
+            self._reasoning_config = self._load_reasoning_config()
+            self._service_tier = self._load_service_tier()
+            self._show_reasoning = self._load_show_reasoning()
+            self._busy_input_mode = self._load_busy_input_mode()
+            self._restart_drain_timeout = self._load_restart_drain_timeout()
+            self._provider_routing = self._load_provider_routing()
+            self._fallback_model = self._load_fallback_model()
+            self._smart_model_routing = self._load_smart_model_routing()
+            self._voice_mode = self._load_voice_modes()
+            return ("⚙️ config.yaml", None)
+        except Exception as e:
+            return ("", f"❌ config.yaml: {e}")
+
+    def _reload_bindings(self) -> tuple:
+        """Invalidate channel binding cache so souls/bindings re-read from disk."""
+        try:
+            import gateway.extensions.channel_binding as _cb_module
+            from gateway.extensions.channel_binding import _session_bindings, _state_lock
+            _cb_module._CONFIG_BINDINGS_CACHE = None
+            with _state_lock:
+                n = len(_session_bindings)
+                _session_bindings.clear()
+            return (f"🔗 bindings ({n} cache(s) cleared)", None)
+        except Exception as e:
+            return ("", f"❌ bindings: {e}")
+
+    def _reload_extensions(self) -> tuple:
+        """Re-discover and re-import all gateway extensions."""
+        try:
+            import importlib
+            from gateway.extensions import _HOOKS, _discover_extensions, list_hooks
+            old_hooks = set(list_hooks().keys())
+            # Clear all registered hooks
+            _HOOKS.clear()
+            # Re-discover extensions (re-imports modules)
+            _discover_extensions()
+            new_hooks = set(list_hooks().keys())
+            added = new_hooks - old_hooks
+            removed = old_hooks - new_hooks
+            detail = f"{len(new_hooks)} event(s)"
+            if added:
+                detail += f" +{added}"
+            if removed:
+                detail += f" -{removed}"
+            return (f"🔌 extensions ({detail})", None)
+        except Exception as e:
+            return ("", f"❌ extensions: {e}")
+
+    def _reload_agent_cache(self) -> tuple:
+        """Clear cached AIAgent instances so new sessions pick up fresh config."""
+        try:
+            with self._agent_cache_lock:
+                n = len(self._agent_cache)
+                self._agent_cache.clear()
+            return (f"🤖 agent cache ({n} cleared)", None)
+        except Exception as e:
+            return ("", f"❌ agent cache: {e}")
+
+    async def _handle_reload_command(self, event: MessageEvent) -> str:
+        """Handle /reload command — hot-reload config, souls, extensions, env vars.
+
+        Supports scoped reloads:
+            /reload           — reload everything
+            /reload env       — reload .env only
+            /reload config    — reload config.yaml + agent cache
+            /reload souls     — invalidate soul/binding caches
+            /reload bindings  — same as souls
+            /reload extensions— re-discover gateway extensions
+        """
+        import time
+        start = time.monotonic()
+        results: list = []
+        errors: list = []
+
+        raw_args = event.get_command_args().strip().lower()
+
+        _RELOAD_SCOPES = {
+            "env": [self._reload_env],
+            "config": [self._reload_config, self._reload_agent_cache],
+            "souls": [self._reload_bindings],
+            "bindings": [self._reload_bindings],
+            "extensions": [self._reload_extensions],
+        }
+        _RELOAD_ALL = [
+            self._reload_env,
+            self._reload_config,
+            self._reload_bindings,
+            self._reload_extensions,
+            self._reload_agent_cache,
+        ]
+
+        if not raw_args or raw_args == "all":
+            steps = _RELOAD_ALL
+        elif raw_args in _RELOAD_SCOPES:
+            steps = _RELOAD_SCOPES[raw_args]
+        else:
+            valid = ", ".join(sorted(list(_RELOAD_SCOPES.keys()) + ["all"]))
+            return f"Unknown scope '{raw_args}'. Valid: {valid}"
+
+        loop = asyncio.get_event_loop()
+        for step in steps:
+            ok, err = await loop.run_in_executor(None, step)
+            if ok:
+                results.append(ok)
+            if err:
+                errors.append(err)
+
+        elapsed = time.monotonic() - start
+        parts = [f"🔄 **Reloaded** ({elapsed:.1f}s)"]
+        if results:
+            parts.append("\n".join(results))
+        if errors:
+            parts.append("\n".join(errors))
+        parts.append("\n💡 Active sessions continue with old config until next message.")
+
+        return "\n".join(parts)
 
     # ------------------------------------------------------------------
     # /approve & /deny — explicit dangerous-command approval
