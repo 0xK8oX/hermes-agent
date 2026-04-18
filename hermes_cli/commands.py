@@ -150,6 +150,16 @@ COMMAND_REGISTRY: list[CommandDef] = [
     CommandDef("bind", "Switch soul personality for current channel",
               "Tools & Skills", gateway_only=True, args_hint="[soul_name|save|list|unbind|--clear]",
               subcommands=("save", "list", "unbind", "--clear")),
+    CommandDef("hall-send", "Send a Hall message to another soul (cross-channel)", "Communication",
+              gateway_only=True, args_hint="<soul> <message>",
+              aliases=("hall_send", "hs")),
+    CommandDef("hall-read", "Read unread Hall messages for current soul", "Communication",
+              gateway_only=True, aliases=("hall_read", "hr")),
+    CommandDef("hall-status", "Show all channel souls status and unread message counts", "Communication",
+              gateway_only=True, aliases=("hall_status", "hst")),
+    CommandDef("hall-report", "Send a status report from this soul to the manager soul", "Communication",
+              gateway_only=True, args_hint="[status_message]",
+              aliases=("hall_report", "hrpt")),
 
     # Info
     CommandDef("commands", "Browse all commands and skills (paginated)", "Info",

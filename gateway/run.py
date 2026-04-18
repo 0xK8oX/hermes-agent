@@ -3034,6 +3034,7 @@ class GatewayRunner:
         "bind", "model", "provider", "restart", "stop",
         "profile", "yolo", "personality",
         "update", "debug", "reload-mcp", "sethome",
+        "hall-send", "hall-read", "hall-status", "hall-report",
     })
 
     def _is_admin_user(self, source: SessionSource) -> bool:
@@ -3609,6 +3610,15 @@ class GatewayRunner:
 
         if canonical == "bind":
             return await self._handle_bind_command(event)
+
+        if canonical == "hall-send":
+            return await self._handle_hall_send_command(event)
+        if canonical == "hall-read":
+            return await self._handle_hall_read_command(event)
+        if canonical == "hall-status":
+            return await self._handle_hall_status_command(event)
+        if canonical == "hall-report":
+            return await self._handle_hall_report_command(event)
 
         if canonical == "plan":
             try:
@@ -5964,7 +5974,185 @@ class GatewayRunner:
                 logger.exception("Session reset after /bind failed")
 
         return result
-    
+
+    # -----------------------------------------------------------------------
+    # Hall commands — cross-channel soul communication
+    # -----------------------------------------------------------------------
+
+    async def _handle_hall_send_command(self, event: MessageEvent) -> str:
+        """Send a Hall message from the current soul to another soul."""
+        from gateway.extensions.channel_binding import _session_soul_names, _ensure_binding_loaded
+        from gateway.extensions.hall import hall_send
+
+        args = event.get_command_args().strip()
+        if not args:
+            return (
+                "Usage: /hall-send <target_soul> [subject] | <body>\n"
+                "Example: /hall-send pm Status Update | Sprint review is done"
+            )
+
+        # Parse args: first word is target, rest is message. Optional subject separated by |
+        parts = args.split(None, 1)
+        to_soul = parts[0]
+        rest = parts[1] if len(parts) > 1 else ""
+
+        subject = ""
+        body = rest
+        if "|" in rest:
+            subj_part, body_part = rest.split("|", 1)
+            subject = subj_part.strip()
+            body = body_part.strip()
+
+        # Determine from_soul: check channel binding for current session
+        session_key = self._session_key_for_source(event.source)
+        _ensure_binding_loaded(session_key)
+        from_soul = _session_soul_names.get(session_key, "hall")
+
+        try:
+            entry = hall_send(from_soul=from_soul, to_soul=to_soul, subject=subject, body=body)
+            return (
+                f"✉️ Hall message sent!\n"
+                f"From: {from_soul} → To: {to_soul}\n"
+                f"Subject: {subject or '(none)'}\n"
+                f"ID: {entry.get('id', '?')}"
+            )
+        except Exception as e:
+            return f"Failed to send Hall message: {e}"
+
+    async def _handle_hall_read_command(self, event: MessageEvent) -> str:
+        """Read unread Hall messages for the current soul."""
+        from gateway.extensions.channel_binding import _session_soul_names, _ensure_binding_loaded
+        from gateway.extensions.hall import hall_read
+
+        session_key = self._session_key_for_source(event.source)
+        _ensure_binding_loaded(session_key)
+        soul = _session_soul_names.get(session_key, "")
+
+        if not soul:
+            return "No soul bound to this channel. Use /bind first."
+
+        messages = hall_read(soul, mark_read=True)
+
+        if not messages:
+            return f"📭 No unread messages for '{soul}'."
+
+        lines = [f"📬 {len(messages)} unread message(s) for '{soul}':\n"]
+        for msg in messages:
+            lines.append(f"  From: {msg.get('from', '?')} | Subject: {msg.get('subject', '(none)')}")
+            lines.append(f"  {msg.get('body', '')[:200]}")
+            lines.append(f"  ID: {msg.get('id', '?')} | Time: {msg.get('ts', '?')}")
+            lines.append("")
+
+        return "\n".join(lines)
+
+    async def _handle_hall_status_command(self, event: MessageEvent) -> str:
+        """Show status of all bound channel souls and their unread counts."""
+        from gateway.extensions.hall import hall_read
+        from gateway.extensions.channel_binding import _get_all_platform_bindings
+
+        all_bindings = _get_all_platform_bindings()
+        if not all_bindings:
+            return "No channel personality bindings configured."
+
+        lines = ["🏛️ **Hall Status — All Channels**\n"]
+
+        for platform_name, bindings_list in all_bindings.items():
+            if not isinstance(bindings_list, list):
+                continue
+            lines.append(f"**{platform_name.upper()}**:")
+            for entry in bindings_list:
+                if not isinstance(entry, dict):
+                    continue
+                soul = entry.get("soul", "?")
+                chan_id = entry.get("id", "?")
+                model = entry.get("model", "default")
+                scope = entry.get("memory_scope", "default")
+
+                # Count unread
+                try:
+                    unread = hall_read(soul, mark_read=False)
+                    unread_count = len(unread) if unread else 0
+                except Exception:
+                    unread_count = "?"
+
+                unread_icon = "🔴" if isinstance(unread_count, int) and unread_count > 0 else "🟢"
+                lines.append(
+                    f"  {unread_icon} {soul} (ch:{chan_id}, model:{model}, scope:{scope}) — {unread_count} unread"
+                )
+            lines.append("")
+
+        return "\n".join(lines)
+
+    async def _handle_hall_report_command(self, event: MessageEvent) -> str:
+        """Send a status report from the current soul to its manager."""
+        from gateway.extensions.channel_binding import _session_soul_names, _ensure_binding_loaded
+        from gateway.extensions.hall import hall_send, hall_read
+
+        args = event.get_command_args().strip()
+        session_key = self._session_key_for_source(event.source)
+        _ensure_binding_loaded(session_key)
+        from_soul = _session_soul_names.get(session_key, "")
+
+        if not from_soul:
+            return "No soul bound to this channel. Use /bind first."
+
+        # Find manager soul: look for pm, alpha, manager, operation in bindings
+        from gateway.extensions.channel_binding import _get_all_platform_bindings
+        all_bindings = _get_all_platform_bindings()
+        manager_soul = None
+        manager_priority = ["pm", "alpha", "manager", "operation", "coordinator"]
+
+        for _platform, bindings_list in (all_bindings or {}).items():
+            if not isinstance(bindings_list, list):
+                continue
+            for entry in bindings_list:
+                if not isinstance(entry, dict):
+                    continue
+                soul_name = (entry.get("soul") or "").lower()
+                for candidate in manager_priority:
+                    if soul_name == candidate and soul_name != from_soul.lower():
+                        manager_soul = entry.get("soul")
+                        break
+                if manager_soul:
+                    break
+            if manager_soul:
+                break
+
+        if not manager_soul:
+            # Fallback: just send to "pm"
+            manager_soul = "pm"
+
+        # Build structured report
+        import datetime
+        now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+
+        # Check for any unread messages (pending tasks from manager)
+        unread = hall_read(from_soul, mark_read=False)
+        unread_count = len(unread) if unread else 0
+
+        subject = f"Status Report — {from_soul} @ {now}"
+        body_lines = [
+            f"**From:** {from_soul}",
+            f"**Time:** {now}",
+            f"**Pending Inbox:** {unread_count} unread message(s)",
+        ]
+        if args:
+            body_lines.append(f"**Status:** {args}")
+        else:
+            body_lines.append("**Status:** (no message provided — routine check-in)")
+        body = "\n".join(body_lines)
+
+        try:
+            entry = hall_send(from_soul=from_soul, to_soul=manager_soul, subject=subject, body=body, priority="normal")
+            return (
+                f"📋 Report sent!\n"
+                f"From: {from_soul} → To: {manager_soul}\n"
+                f"Subject: {subject}\n"
+                f"ID: {entry.get('id', '?')}"
+            )
+        except Exception as e:
+            return f"Failed to send report: {e}"
+
     async def _handle_retry_command(self, event: MessageEvent) -> str:
         """Handle /retry command - re-send the last user message."""
         source = event.source

@@ -26,6 +26,12 @@ Hooks registered:
     - ``get_ephemeral(session_key)`` — injects unread messages as soul context
     - ``on_session_cleanup(session_key)`` — optionally purges old messages
 
+Auto-dispatch:
+    After ``hall_send()``, if the target soul is bound to a channel and the
+    gateway is running, a cross-channel dispatch automatically triggers the
+    target soul's agent.  This enables real-time inter-soul communication
+    without waiting for a human to start a session on the target channel.
+
 Public API (used by memory tool or other callers):
     - ``hall_send(from_soul, to_soul, subject, body, priority)`` → entry dict
     - ``hall_read(soul, mark_read)`` → list of unread messages
@@ -116,6 +122,99 @@ def _get_soul_name(session_key: str) -> Optional[str]:
 
 
 # ---------------------------------------------------------------------------
+# Soul → Channel reverse lookup (for auto-dispatch)
+# ---------------------------------------------------------------------------
+
+def _lookup_soul_channel(soul_name: str) -> Optional[Dict[str, str]]:
+    """Find the (platform, chat_id) that a soul is bound to.
+
+    Scans config.yaml channel_personality_bindings across all platforms.
+    Returns the *first* match as {"platform": ..., "chat_id": ...} or None.
+    """
+    if not soul_name:
+        return None
+    soul_lower = soul_name.lower().strip()
+    try:
+        from gateway.extensions.channel_binding import _get_all_platform_bindings
+        all_bindings = _get_all_platform_bindings()
+    except (ImportError, Exception):
+        return None
+
+    for platform_name, bindings_list in all_bindings.items():
+        if not isinstance(bindings_list, list):
+            continue
+        for entry in bindings_list:
+            if isinstance(entry, dict) and entry.get("soul", "").lower() == soul_lower:
+                chan_id = entry.get("id")
+                if chan_id:
+                    return {"platform": platform_name, "chat_id": str(chan_id)}
+    return None
+
+
+def _auto_dispatch(entry: dict) -> None:
+    """After hall_send, try to trigger the target soul's agent via cross-channel dispatch.
+
+    Runs in a background thread to avoid blocking the caller.
+    Gracefully no-ops if the gateway is not running or target has no bound channel.
+    """
+    to_soul = entry.get("to", "")
+    if not to_soul or to_soul == "all":
+        # Broadcast — no single target to dispatch to
+        return
+
+    target = _lookup_soul_channel(to_soul)
+    if not target:
+        logger.debug("[Hall] No bound channel found for soul '%s', skipping auto-dispatch", to_soul)
+        return
+
+    def _dispatch():
+        try:
+            from gateway.extensions.cross_channel import dispatch_cross_channel
+            from gateway.run import get_gateway_runner
+            runner = get_gateway_runner()
+            logger.info(
+                "[Hall] Auto-dispatch: soul '%s' → %s:%s, runner=%s",
+                to_soul, target["platform"], target["chat_id"],
+                "active" if runner else "None",
+            )
+            from_soul = entry.get("from", "hall")
+            subject = entry.get("subject", "")
+            body = entry.get("body", "")
+            msg_id = entry.get("id", "")
+            text = (
+                f"📬 **Hall Message** (from: {from_soul})\n\n"
+                f"**Subject:** {subject}\n\n"
+                f"{body}\n\n"
+                f"_Message ID: {msg_id} — use `hall` tool to reply._"
+            )
+            result_json = dispatch_cross_channel(
+                platform=target["platform"],
+                chat_id=target["chat_id"],
+                text=text,
+                source_session_key=f"hall:{from_soul}",
+                source_user_name=f"{from_soul} (via Hall)",
+            )
+            import json as _json
+            result = _json.loads(result_json)
+            if result.get("success"):
+                logger.info(
+                    "[Hall] Auto-dispatched to %s:%s for soul '%s'",
+                    target["platform"], target["chat_id"], to_soul,
+                )
+            else:
+                logger.debug(
+                    "[Hall] Auto-dispatch skipped for soul '%s': %s",
+                    to_soul, result.get("error", "unknown"),
+                )
+        except Exception as e:
+            logger.debug("[Hall] Auto-dispatch error for soul '%s': %s", to_soul, e)
+
+    # Fire in background thread — never block the sender
+    t = threading.Thread(target=_dispatch, name=f"hall-dispatch-{to_soul}", daemon=True)
+    t.start()
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -166,6 +265,10 @@ def hall_send(
         "[Hall] %s → %s: %s (priority=%s)",
         from_soul, to_soul, subject[:50], priority,
     )
+
+    # Auto-dispatch: trigger target soul's agent if gateway is running
+    _auto_dispatch(entry)
+
     return entry
 
 

@@ -880,6 +880,18 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
             except Exception as e:
                 logger.debug("Job '%s': failed to load credential pool for %s: %s", job_id, runtime_provider, e)
 
+        # Resolve memory_scope from binding — if present, enable memory for
+        # the cron agent so it can recall context from the bound channel's scope.
+        _cron_memory_scope = None
+        _cron_skip_memory = True  # Default: no memory (backward compatible)
+        if _cron_binding and _cron_binding.get("memory_scope"):
+            _cron_memory_scope = _cron_binding["memory_scope"]
+            _cron_skip_memory = False  # Bound channel has a scope → enable memory
+            logger.info(
+                "Job '%s': inherited memory_scope '%s' from %s/%s",
+                job_id, _cron_memory_scope, origin.get("platform"), origin.get("chat_id"),
+            )
+
         agent = AIAgent(
             model=model,
             api_key=runtime.get("api_key"),
@@ -900,7 +912,8 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
             disabled_toolsets=["cronjob", "messaging", "clarify"],
             quiet_mode=True,
             skip_context_files=True,  # Don't inject SOUL.md/AGENTS.md from scheduler cwd
-            skip_memory=True,  # Cron system prompts would corrupt user representations
+            skip_memory=_cron_skip_memory,
+            memory_scope=_cron_memory_scope,
             platform="cron",
             session_id=_cron_session_id,
             session_db=_session_db,
