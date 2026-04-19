@@ -108,7 +108,12 @@ SEND_MESSAGE_SCHEMA = {
         "(not just a bare platform name), call send_message(action='list') FIRST to see "
         "available targets, then send to the correct one.\n"
         "If the user just says a platform name like 'send to telegram', send directly "
-        "to the home channel without listing first."
+        "to the home channel without listing first.\n\n"
+        "When trigger_agent is true, the message is delivered to the target channel "
+        "AND the target channel's agent is triggered to process it with its own "
+        "soul, model, and memory. Use this for cross-channel agent delegation — "
+        "e.g., asking the research agent to investigate something while the dev "
+        "agent continues working."
     ),
     "parameters": {
         "type": "object",
@@ -125,6 +130,10 @@ SEND_MESSAGE_SCHEMA = {
             "message": {
                 "type": "string",
                 "description": "The message text to send"
+            },
+            "trigger_agent": {
+                "type": "boolean",
+                "description": "If true, after delivering the message, trigger the target channel's agent to process it. The target agent uses its own soul, model, and memory scope. Useful for inter-agent communication (e.g. dev agent asking research agent a question). Only works when the gateway is running."
             }
         },
         "required": []
@@ -298,6 +307,33 @@ def _handle_send(args):
                     result["mirrored"] = True
             except Exception:
                 pass
+
+        # Cross-channel agent dispatch
+        trigger = args.get("trigger_agent", False)
+        if trigger and isinstance(result, dict) and result.get("success"):
+            try:
+                from gateway.extensions.cross_channel import dispatch_cross_channel
+                from gateway.session_context import get_session_env
+                source_key = get_session_env("HERMES_SESSION_KEY", "")
+                source_user = get_session_env("HERMES_SESSION_USER_NAME", "System")
+                dispatch_result = dispatch_cross_channel(
+                    platform=platform_name,
+                    chat_id=chat_id,
+                    text=mirror_text or cleaned_message,
+                    source_session_key=source_key,
+                    source_user_name=source_user,
+                    thread_id=thread_id,
+                )
+                dispatch_data = json.loads(dispatch_result)
+                if dispatch_data.get("success"):
+                    result["agent_triggered"] = True
+                    result["agent_status"] = "Target agent processing message"
+                else:
+                    result["agent_triggered"] = False
+                    result["agent_error"] = dispatch_data.get("error", "Unknown error")
+            except Exception as e:
+                result["agent_triggered"] = False
+                result["agent_error"] = str(e)
 
         if isinstance(result, dict) and "error" in result:
             result["error"] = _sanitize_error_text(result["error"])

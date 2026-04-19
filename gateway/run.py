@@ -338,6 +338,16 @@ def _expand_whatsapp_auth_aliases(identifier: str) -> set:
 
 logger = logging.getLogger(__name__)
 
+# Module-level reference to the running GatewayRunner, set by start_gateway().
+# Used by cross_channel dispatch to inject synthetic events into adapters.
+_gateway_runner_ref: Optional["GatewayRunner"] = None
+
+
+def get_gateway_runner() -> Optional["GatewayRunner"]:
+    """Return the running GatewayRunner, or None if the gateway is not up."""
+    return _gateway_runner_ref
+
+
 # Sentinel placed into _running_agents immediately when a session starts
 # processing, *before* any await.  Prevents a second message for the same
 # session from bypassing the "already running" guard during the async gap
@@ -8446,6 +8456,84 @@ class GatewayRunner:
         except Exception as e:
             logger.error("Watch notification injection error: %s", e)
 
+    async def inject_cross_channel_message(
+        self,
+        target_platform: str,
+        target_chat_id: str,
+        text: str,
+        source_session_key: str = "",
+        source_user_name: str = "System",
+        thread_id: str = None,
+    ) -> dict:
+        """Inject a synthetic message into a target channel's agent pipeline.
+
+        Used by the cross_channel extension when ``trigger_agent=true``.
+        Creates a synthetic MessageEvent with ``internal=True`` (bypasses auth)
+        and feeds it through the target channel's adapter into the full
+        message-processing pipeline — so the target agent processes it with
+        its own soul, model, and memory scope.
+
+        Args:
+            target_platform: Platform name string (e.g. "discord").
+            target_chat_id: Target channel/chat ID (numeric string).
+            text: The message text to inject.
+            source_session_key: The originating session key (for mirror-back).
+            source_user_name: Display name for the synthetic event source.
+            thread_id: Optional thread ID within the target channel.
+
+        Returns:
+            Dict with ``success`` and details, or ``error`` on failure.
+        """
+        from gateway.config import Platform
+        from gateway.platforms.base import MessageEvent, MessageType, SessionSource
+
+        # Resolve platform enum
+        platform_map = {p.value: p for p in Platform}
+        platform = platform_map.get(target_platform)
+        if not platform:
+            return {"error": f"Unknown platform: {target_platform}"}
+
+        adapter = self.adapters.get(platform)
+        if not adapter:
+            return {"error": f"No adapter connected for {target_platform}"}
+
+        try:
+            # Build a synthetic SessionSource for the target channel
+            source = SessionSource(
+                platform=platform,
+                chat_id=str(target_chat_id),
+                chat_type="group",
+                user_id="cross_channel",
+                user_name=source_user_name,
+                thread_id=thread_id or "",
+            )
+
+            event = MessageEvent(
+                text=text,
+                message_type=MessageType.TEXT,
+                source=source,
+                internal=True,  # Bypass user authorization
+                extra={
+                    "cross_channel": True,
+                    "source_session_key": source_session_key,
+                },
+            )
+
+            logger.info(
+                "[CrossChannel] Injecting into %s:%s (thread=%s) from %s",
+                target_platform, target_chat_id, thread_id, source_session_key,
+            )
+            await adapter.handle_message(event)
+            return {
+                "success": True,
+                "platform": target_platform,
+                "chat_id": target_chat_id,
+                "triggered_agent": True,
+            }
+        except Exception as e:
+            logger.error("[CrossChannel] Injection error: %s", e)
+            return {"error": str(e)}
+
     async def _run_process_watcher(self, watcher: dict) -> None:
         """
         Periodically check a background process and push updates to the user.
@@ -9749,6 +9837,14 @@ class GatewayRunner:
                 _persist_mem_scope = fire_hooks_first("get_memory_scope", session_key)
             except Exception:
                 pass
+            # Direct fallback: read from event.extra["channel_binding"] which
+            # the Discord adapter already resolves via parent_id (L2563-2567).
+            # The hook-based resolution fails for threads because the session
+            # key contains the thread ID, not the parent channel ID.
+            if not _persist_mem_scope:
+                _ev_binding = getattr(event, "extra", {}).get("channel_binding") if event else None
+                if _ev_binding and isinstance(_ev_binding, dict):
+                    _persist_mem_scope = _ev_binding.get("memory_scope")
 
             # Check agent cache — reuse the AIAgent from the previous message
             # in this session to preserve the frozen system prompt and tool
@@ -10990,6 +11086,11 @@ async def start_gateway(config: Optional[GatewayConfig] = None, replace: bool = 
             logging.getLogger().setLevel(_stderr_level)
 
     runner = GatewayRunner(config)
+
+    # Expose runner to the process for cross_channel dispatch and other
+    # extensions that need to inject synthetic events into adapters.
+    global _gateway_runner_ref
+    _gateway_runner_ref = runner
     
     # Track whether a signal initiated the shutdown (vs. internal request).
     # When an unexpected SIGTERM kills the gateway, we exit non-zero so

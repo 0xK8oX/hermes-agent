@@ -661,16 +661,12 @@ def _sanitize_structure_non_ascii(payload: Any) -> bool:
 
 
 
-# =========================================================================
 # Large tool result handler — save oversized output to temp file
-# =========================================================================
 
 
-# =========================================================================
 # Qwen Portal headers — mimics QwenCode CLI for portal.qwen.ai compatibility.
 # Extracted as a module-level helper so both __init__ and
 # _apply_client_headers_for_base_url can share it.
-# =========================================================================
 _QWEN_CODE_VERSION = "0.14.1"
 
 
@@ -1497,6 +1493,12 @@ class AIAgent:
                         if getattr(self, "_memory_scope", None):
                             _init_kwargs["memory_scope"] = self._memory_scope
                         self._memory_manager.initialize_all(**_init_kwargs)
+                        logger.info(
+                            "[MemDebug] initialize_all done: memory_scope=%s, providers=%s, tool_schemas=%d",
+                            self._memory_scope,
+                            [p.name for p in self._memory_manager.providers],
+                            len(self._memory_manager.get_all_tool_schemas()),
+                        )
                         logger.info("Memory provider '%s' activated", _mem_provider_name)
                     else:
                         logger.debug("Memory provider '%s' not found or not available", _mem_provider_name)
@@ -1511,6 +1513,9 @@ class AIAgent:
         # through get_tool_definitions()).  Duplicate function names cause
         # 400 errors on providers that enforce unique names (e.g. Xiaomi
         # MiMo via Nous Portal).
+        # Inject memory provider tool schemas into the tool surface
+        # Inject memory provider tool schemas into the tool surface
+        _mem_schemas = []
         if self._memory_manager and self.tools is not None:
             _existing_tool_names = {
                 t.get("function", {}).get("name")
@@ -1521,11 +1526,26 @@ class AIAgent:
                 _tname = _schema.get("name", "")
                 if _tname and _tname in _existing_tool_names:
                     continue  # already registered via plugin path
+            for _schema in self._memory_manager.get_all_tool_schemas():
+            _mem_schemas = self._memory_manager.get_all_tool_schemas()
+            logger.info(
+                "[MemDebug] Tool injection: _memory_manager=%s, tools=%d, mem_schemas=%d",
+                self._memory_manager is not None,
+                len(self.tools) if self.tools else -1,
+                len(_mem_schemas),
+            )
+            for _schema in _mem_schemas:
                 _wrapped = {"type": "function", "function": _schema}
                 self.tools.append(_wrapped)
                 if _tname:
                     self.valid_tool_names.add(_tname)
                     _existing_tool_names.add(_tname)
+        else:
+            logger.info(
+                "[MemDebug] Tool injection SKIPPED: _memory_manager=%s, tools=%s",
+                self._memory_manager is not None,
+                "None" if self.tools is None else f"len={len(self.tools)}",
+            )
 
         # Skills config: nudge interval for skill creation reminders
         self._skill_nudge_interval = 10
@@ -4112,9 +4132,7 @@ class AIAgent:
 
         return "\n\n".join(p.strip() for p in prompt_parts if p.strip())
 
-    # =========================================================================
     # Pre/post-call guardrails (inspired by PR #1321 — @alireza78a)
-    # =========================================================================
 
     @staticmethod
     def _get_tool_call_id_static(tc) -> str:

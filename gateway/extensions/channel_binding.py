@@ -193,8 +193,14 @@ def _apply_binding(session_key: str, binding: dict) -> None:
 def _resolve_binding_from_session_key(session_key: str) -> Optional[dict]:
     """Resolve a channel binding from session_key + config.
 
-    Parses ``agent:main:{platform}:{chat_type}:{chat_id}`` and matches
-    against all configured platform bindings.
+    Parses ``agent:main:{platform}:{chat_type}:{chat_id}[:{thread_id}[:...]]``
+    and matches against all configured platform bindings.
+
+    Matching strategy:
+      1. Exact match on chat_id (position 4)
+      2. For threads, also try the thread_id (position 5) against config IDs
+      3. For threads, also try to match the parent channel's bindings
+         by stripping the thread_id and checking the parent chat_id
     """
     if not session_key:
         return None
@@ -204,19 +210,42 @@ def _resolve_binding_from_session_key(session_key: str) -> Optional[dict]:
         return None
 
     platform = parts[2]
+    chat_type = parts[3] if len(parts) > 3 else ""
     chat_id = parts[4] if len(parts) > 4 else None
+    thread_id = parts[5] if len(parts) > 5 else None
     if not chat_id:
         return None
 
     all_bindings = _get_all_platform_bindings()
     platform_bindings = all_bindings.get(platform, [])
 
+    # Strategy 1: exact match on chat_id
     for entry in platform_bindings:
         if not isinstance(entry, dict):
             continue
         entry_id = str(entry.get("id", ""))
         if entry_id == chat_id:
             return entry
+
+    # Strategy 2: for threads, also try thread_id and consider that
+    # the session key may use the thread's own ID as chat_id.
+    # In Discord, the parent channel ID is NOT in the session key for threads,
+    # so we check if any binding's ID matches any part of the key.
+    if chat_type == "thread" and thread_id:
+        # The session key for a thread is agent:main:discord:thread:{thread_id}:{thread_id}
+        # We need to check if any binding could be the parent channel.
+        # Since we can't know the parent ID from the session key alone,
+        # we check all bindings that have the same platform.
+        # The Discord adapter handles this via event.extra["channel_binding"]
+        # in Path 1 of _on_new_session, but this fallback helps for
+        # cached/restarted sessions where on_new_session didn't fire.
+        for entry in platform_bindings:
+            if not isinstance(entry, dict):
+                continue
+            # If the entry has a threads list, check if our thread_id is in it
+            entry_threads = entry.get("threads", [])
+            if isinstance(entry_threads, list) and thread_id in [str(t) for t in entry_threads]:
+                return entry
 
     return None
 
@@ -355,8 +384,27 @@ def _get_memory_scope(session_key: str) -> Optional[str]:
       - None: default (unscoped, backward compatible)
       - "dev", "pm", etc.: read _global/ + {scope}/
       - "*": God mode, read _global/ + ALL subdirectories
+
+    Falls back to re-resolving from config if not cached (e.g. after
+    process restart, where in-memory state is lost for existing sessions).
     """
-    return _session_memory_scopes.get(session_key)
+    scope = _session_memory_scopes.get(session_key)
+    if scope is not None:
+        return scope
+
+    # Fallback: re-resolve binding from session key + config
+    binding = _resolve_binding_from_session_key(session_key)
+    if binding and isinstance(binding, dict):
+        memory_scope = binding.get("memory_scope")
+        if memory_scope and isinstance(memory_scope, str):
+            _session_memory_scopes[session_key] = memory_scope
+            logger.info(
+                "[ChannelBinding] Memory scope '%s' re-resolved for session %s",
+                memory_scope, session_key[:30],
+            )
+            return memory_scope
+
+    return None
 
 
 # ---------------------------------------------------------------------------

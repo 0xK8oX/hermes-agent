@@ -371,3 +371,24 @@ class MemoryManager:
                     "Memory provider '%s' initialize failed: %s",
                     provider.name, e,
                 )
+
+        # Re-index tool routing now that providers are initialized.
+        # At add_provider() time, get_tool_schemas() may return [] because
+        # the provider hasn't been initialized yet (e.g. MemPalace gates
+        # schemas behind _initialized).  After initialize() runs, schemas
+        # become available — populate _tool_to_provider so tool calls route.
+        for provider in self._providers:
+            try:
+                for schema in provider.get_tool_schemas():
+                    tool_name = schema.get("name", "")
+                    if tool_name and tool_name not in self._tool_to_provider:
+                        self._tool_to_provider[tool_name] = provider
+                logger.info(
+                    "Memory provider '%s' post-init tool re-index: %d tools",
+                    provider.name, len(provider.get_tool_schemas()),
+                )
+            except Exception as e:
+                logger.debug(
+                    "Memory provider '%s' post-init tool re-index failed: %s",
+                    provider.name, e,
+                )
