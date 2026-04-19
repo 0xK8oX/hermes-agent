@@ -5960,8 +5960,8 @@ class AIAgent:
         # for prefill on large contexts.  Disable the stale detector unless
         # the user explicitly set HERMES_STREAM_STALE_TIMEOUT.
         if _stream_stale_timeout_base == 180.0 and self.base_url and is_local_endpoint(self.base_url):
-            _stream_stale_timeout = float("inf")
-            logger.debug("Local provider detected (%s) — stale stream timeout disabled", self.base_url)
+            _stream_stale_timeout = 600.0  # local provider can be slow but not infinite
+            logger.debug("Local provider detected (%s) — stale stream timeout capped at 600s", self.base_url)
         else:
             # Scale the stale timeout for large contexts: slow models (like Opus)
             # can legitimately think for minutes before producing the first token

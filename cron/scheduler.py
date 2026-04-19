@@ -884,13 +884,7 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
         # the cron agent so it can recall context from the bound channel's scope.
         _cron_memory_scope = None
         _cron_skip_memory = True  # Default: no memory (backward compatible)
-        if _cron_binding and _cron_binding.get("memory_scope"):
-            _cron_memory_scope = _cron_binding["memory_scope"]
-            _cron_skip_memory = False  # Bound channel has a scope → enable memory
-            logger.info(
-                "Job '%s': inherited memory_scope '%s' from %s/%s",
-                job_id, _cron_memory_scope, origin.get("platform"), origin.get("chat_id"),
-            )
+        # memory_scope will be added by later commit (channel binding consolidation)
 
         agent = AIAgent(
             model=model,

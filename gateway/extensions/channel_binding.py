@@ -194,6 +194,7 @@ def _on_new_session(session_key: str, event: Any) -> None:
     1. ``event.extra["channel_binding"]`` — set by platform adapter (Discord)
     2. Session-key → config match — works for any platform without adapter changes
     """
+
     binding = None
 
     # Path 1: adapter-provided binding (Discord sets event.extra)
@@ -220,6 +221,7 @@ def _apply_binding_unlocked(session_key: str, binding: dict) -> None:
     """Internal: mutate session state (caller must hold _state_lock)."""
     soul_name = binding.get("soul")
     model = binding.get("model")
+
     skills = binding.get("skills")
     memory_scope = binding.get("memory_scope")
 
@@ -414,9 +416,11 @@ def _on_session_reset(session_key: str) -> None:
     global _CONFIG_BINDINGS_CACHE
     _CONFIG_BINDINGS_CACHE = None
 
+
     with _state_lock:
         binding = _session_bindings.get(session_key)
         if not binding:
+
             return
 
         # Re-load soul from disk
@@ -472,7 +476,10 @@ def _get_model_override(session_key: str) -> Optional[Dict[str, Optional[str]]]:
     """Return the channel binding model override for a session, or None."""
     _ensure_binding_loaded(session_key)
     with _state_lock:
-        return _session_model_overrides.get(session_key)
+        result = _session_model_overrides.get(session_key)
+        if not result:
+            logger.debug("[ChannelBinding] get_model_override MISS: key=%s", session_key[:80])
+        return result
 
 
 def _get_ephemeral(session_key: str) -> Optional[str]:
@@ -1045,6 +1052,7 @@ async def handle_bind_command(session_store, event) -> str:
     source = event.source
     session_entry = session_store.get_or_create_session(source)
     session_key = session_entry.session_key
+
     if not session_key:
         return "⚠️ Session key unavailable. Please try again."
     parsed = _parse_session_key(session_key)
@@ -1219,6 +1227,7 @@ async def handle_bind_command(session_store, event) -> str:
         )
 
     # /bind (no args) — show current binding
+    _ensure_binding_loaded(session_key)
     current_soul = _session_soul_names.get(session_key)
     current_model = fire_hooks_first("get_model_override", session_key)
 

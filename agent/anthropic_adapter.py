@@ -1003,6 +1003,7 @@ def _convert_content_to_anthropic(content: Any) -> Any:
 def convert_messages_to_anthropic(
     messages: List[Dict],
     base_url: str | None = None,
+    reasoning_config: Dict[str, Any] | None = None,
 ) -> Tuple[Optional[Any], List[Dict]]:
     """Convert OpenAI-format messages to Anthropic format.
 
@@ -1014,6 +1015,14 @@ def convert_messages_to_anthropic(
     endpoint, all thinking block signatures are stripped.  Signatures are
     Anthropic-proprietary — third-party endpoints cannot validate them and will
     reject them with HTTP 400 "Invalid signature in thinking block".
+
+    When *reasoning_config* is provided with ``enabled`` not False and the target
+    is a third-party endpoint, reasoning text from the original messages
+    (``reasoning`` / ``reasoning_content`` fields) is injected as unsigned
+    ``thinking`` blocks so that third-party Anthropic-compatible endpoints
+    (Zhipu GLM, MiniMax, etc.) that require thinking content in every assistant
+    message don't reject the request with
+    ``thinking is enabled but reasoning_content is missing``.
     """
     system = None
     result = []
@@ -1217,6 +1226,28 @@ def convert_messages_to_anthropic(
     #    cache markers can interfere with signature validation.
     _THINKING_TYPES = frozenset(("thinking", "redacted_thinking"))
     _is_third_party = _is_third_party_anthropic_endpoint(base_url)
+    # Determine whether thinking will be enabled in the request.  Third-party
+    # Anthropic-compatible endpoints (Zhipu GLM, MiniMax, etc.) require every
+    # assistant message to contain a thinking block when thinking is enabled.
+    _thinking_enabled = (
+        _is_third_party
+        and reasoning_config is not None
+        and isinstance(reasoning_config, dict)
+        and reasoning_config.get("enabled") is not False
+    )
+
+    # When thinking is enabled on a third-party endpoint, build a mapping of
+    # assistant-message index → reasoning text from the original messages.
+    # This lets us inject unsigned thinking blocks after stripping signed ones.
+    _reasoning_by_index: Dict[int, str] = {}
+    if _thinking_enabled:
+        _asst_idx = 0
+        for msg in messages:
+            if msg.get("role") == "assistant":
+                r = msg.get("reasoning") or msg.get("reasoning_content")
+                if r:
+                    _reasoning_by_index[_asst_idx] = r
+                _asst_idx += 1
 
     last_assistant_idx = None
     for i in range(len(result) - 1, -1, -1):
@@ -1224,6 +1255,7 @@ def convert_messages_to_anthropic(
             last_assistant_idx = i
             break
 
+    _asst_counter = 0
     for idx, m in enumerate(result):
         if m.get("role") != "assistant" or not isinstance(m.get("content"), list):
             continue
@@ -1236,6 +1268,21 @@ def convert_messages_to_anthropic(
                 b for b in m["content"]
                 if not (isinstance(b, dict) and b.get("type") in _THINKING_TYPES)
             ]
+
+            # When thinking is enabled, third-party Anthropic-compatible
+            # endpoints (Zhipu GLM, MiniMax) require every assistant message
+            # to contain a thinking block.  After stripping signed blocks,
+            # inject the reasoning text from the original message as an
+            # unsigned thinking block so the API doesn't reject the request
+            # with "thinking is enabled but reasoning_content is missing".
+            if _thinking_enabled and not any(
+                isinstance(b, dict) and b.get("type") in _THINKING_TYPES
+                for b in stripped
+            ):
+                reasoning_text = _reasoning_by_index.get(_asst_counter)
+                if reasoning_text:
+                    stripped.insert(0, {"type": "thinking", "thinking": reasoning_text})
+
             m["content"] = stripped or [{"type": "text", "text": "(thinking elided)"}]
         else:
             # Latest assistant on direct Anthropic: keep signed thinking
@@ -1260,6 +1307,9 @@ def convert_messages_to_anthropic(
                     if thinking_text:
                         new_content.append({"type": "text", "text": thinking_text})
             m["content"] = new_content or [{"type": "text", "text": "(empty)"}]
+
+        # Track assistant message counter for reasoning lookup
+        _asst_counter += 1
 
         # Strip cache_control from any remaining thinking/redacted_thinking
         # blocks — cache markers interfere with signature validation.
@@ -1321,7 +1371,9 @@ def build_anthropic_kwargs(
     Currently only supported on native Anthropic endpoints (not third-party
     compatible ones).
     """
-    system, anthropic_messages = convert_messages_to_anthropic(messages, base_url=base_url)
+    system, anthropic_messages = convert_messages_to_anthropic(
+        messages, base_url=base_url, reasoning_config=reasoning_config,
+    )
     anthropic_tools = convert_tools_to_anthropic(tools) if tools else []
 
     model = normalize_model_name(model, preserve_dots=preserve_dots)

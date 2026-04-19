@@ -224,18 +224,20 @@ def _auto_dispatch(entry: dict) -> None:
         logger.debug("[Hall] No bound channel found for soul '%s', skipping auto-dispatch", to_soul)
         return
 
+    # Fast path: check if we're in a subprocess first (synchronous — no thread needed)
+    from gateway.run import get_gateway_runner
+    runner = get_gateway_runner()
+
+    if runner is None:
+        # We're in a subprocess — write pending file synchronously (daemon threads
+        # get killed when the main thread exits, so pending file may never be written)
+        logger.info("[Hall] No gateway runner (subprocess), writing pending dispatch for '%s'", to_soul)
+        _write_dispatch_pending(entry)
+        return
+
     def _dispatch():
         try:
             from gateway.extensions.cross_channel import dispatch_cross_channel
-            from gateway.run import get_gateway_runner
-            runner = get_gateway_runner()
-
-            if runner is None:
-                # We're in a subprocess — write pending file for gateway watcher
-                logger.info("[Hall] No gateway runner (subprocess), writing pending dispatch for '%s'", to_soul)
-                _write_dispatch_pending(entry)
-                return
-
             logger.info(
                 "[Hall] Auto-dispatch: soul '%s' → %s:%s",
                 to_soul, target["platform"], target["chat_id"],
@@ -244,11 +246,6 @@ def _auto_dispatch(entry: dict) -> None:
 
         except Exception as e:
             logger.debug("[Hall] Auto-dispatch error for soul '%s': %s", to_soul, e)
-            # Fallback: write pending file
-            try:
-                _write_dispatch_pending(entry)
-            except Exception:
-                pass
 
     t = threading.Thread(target=_dispatch, name=f"hall-dispatch-{to_soul}", daemon=True)
     t.start()
@@ -284,10 +281,12 @@ def _execute_dispatch(entry: dict, target: dict) -> None:
             target["platform"], target["chat_id"], to_soul,
         )
     else:
+        error_msg = result.get("error", "unknown")
         logger.warning(
             "[Hall] Auto-dispatch failed for soul '%s': %s",
-            to_soul, result.get("error", "unknown"),
+            to_soul, error_msg,
         )
+        raise RuntimeError(f"Dispatch failed for soul '{to_soul}': {error_msg}")
 
 
 # ---------------------------------------------------------------------------

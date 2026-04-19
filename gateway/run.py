@@ -673,6 +673,17 @@ class GatewayRunner:
         self._busy_ack_ts: Dict[str, float] = {}  # last busy-ack timestamp per session (debounce)
         self._session_run_generation: Dict[str, int] = {}
 
+        # Stale-activity detector: tracks when the agent's activity description
+        # stops advancing (same tool, same phase).  Periodic activity touches
+        # (e.g. "terminal command running (10s elapsed)") keep the inactivity
+        # timer alive even when the agent is stuck, so we need a separate
+        # mechanism to detect a truly hung agent whose description keeps
+        # repeating without making progress.
+        # Key: session_key, Value: (activity_category, first_seen_ts)
+        self._activity_phase_ts: Dict[str, tuple] = {}
+        _STALE_PHASE_ENV = os.getenv("HERMES_GATEWAY_STALE_PHASE_TIMEOUT", "")
+        self._stale_phase_timeout: float = float(_STALE_PHASE_ENV) if _STALE_PHASE_ENV else 600.0
+
         # Cache AIAgent instances per session to preserve prompt caching.
         # Without this, a new AIAgent is created per message, rebuilding the
         # system prompt (including memory) every turn — breaking prefix cache
@@ -1077,12 +1088,14 @@ class GatewayRunner:
                     override_runtime.get("provider"),
                 )
                 return override_model, override_runtime
-            # Override exists but has no api_key — fall through to env-based
-            # resolution and apply model/provider from the override on top.
-            logger.debug(
-                "Session model override (no api_key, fallback): session=%s config_model=%s override_model=%s",
+            # Override exists but has no api_key — apply model/provider anyway
+            # using env-based credentials for the provider.
+            logger.info(
+                "Session model override (no api_key): session=%s config_model=%s -> override_model=%s provider=%s",
                 (resolved_session_key or "")[:30], model, override_model,
+                override_runtime.get("provider"),
             )
+            return override_model, override_runtime
         else:
             logger.debug(
                 "No session model override: session=%s config_model=%s override_keys=%s",
@@ -5101,6 +5114,7 @@ class GatewayRunner:
         # gets the "Session reset!" response immediately.
         try:
             old_entry = self.session_store._entries.get(session_key)
+
             if old_entry:
                 _flush_task = asyncio.create_task(
                     self._async_flush_memories(old_entry.session_id, session_key)
@@ -5142,7 +5156,9 @@ class GatewayRunner:
 
         # Extension hook: restore extension state after /reset
         from gateway.extensions import fire_hooks
+
         fire_hooks("on_session_reset", session_key)
+
 
         # Fire plugin on_session_finalize hook (session boundary)
         try:
@@ -6066,10 +6082,14 @@ class GatewayRunner:
         # access to the gateway instance (self).
         # Wrap in try/except so the user always sees the bind result,
         # even if cleanup fails (bind is already committed).
-        if getattr(event, "extra", None) and event.extra.get("_bind_reset"):
+        _has_reset = getattr(event, "extra", None) and event.extra.get("_bind_reset")
+
+        if _has_reset:
             event.extra.pop("_bind_reset", None)
+
             try:
                 await self._perform_session_reset(event)
+
             except Exception:
                 logger.exception("Session reset after /bind failed")
 
@@ -10961,6 +10981,41 @@ class GatewayRunner:
                     if _idle_secs >= _agent_timeout:
                         _inactivity_timeout = True
                         break
+
+                    # ── Stale-activity (stuck phase) detector ──────────
+                    # The agent may update _touch_activity() periodically
+                    # (e.g. "terminal command running (10s elapsed)") while
+                    # being genuinely stuck on the same operation.  Detect
+                    # this by stripping counter/timing suffixes and checking
+                    # if the activity "phase" has been the same for too long.
+                    if _agent_ref and hasattr(_agent_ref, "get_activity_summary") and self._stale_phase_timeout > 0:
+                        try:
+                            _act = _agent_ref.get_activity_summary()
+                            _raw_desc = _act.get("last_activity_desc", "")
+                            _cur_tool = _act.get("current_tool")
+                            # Build a phase key: tool name + base description
+                            # (strip timing/counters like "(10s elapsed)" or "#5")
+                            import re as _re
+                            _phase_base = _re.sub(r'\(\d+s elapsed\)', '', _raw_desc)
+                            _phase_base = _re.sub(r'#\d+', '#N', _phase_base).strip()
+                            _phase_key = f"{_cur_tool or 'none'}:{_phase_base}"
+                            _now_ts = time.time()
+                            _prev_phase = self._activity_phase_ts.get(session_key)
+                            if _prev_phase is None or _prev_phase[0] != _phase_key:
+                                # Phase changed — reset tracker
+                                self._activity_phase_ts[session_key] = (_phase_key, _now_ts)
+                            else:
+                                _phase_age = _now_ts - _prev_phase[1]
+                                if _phase_age >= self._stale_phase_timeout:
+                                    logger.warning(
+                                        "Stale-activity detected: session %s stuck on phase '%s' "
+                                        "for %.0fs (threshold %.0fs). Treating as inactivity timeout.",
+                                        session_key[:20], _phase_key, _phase_age, self._stale_phase_timeout,
+                                    )
+                                    _inactivity_timeout = True
+                                    break
+                        except Exception:
+                            pass
                     # Backup interrupt check (same as unlimited path).
                     if not _interrupt_detected.is_set() and session_key:
                         _backup_adapter = self.adapters.get(source.platform)
