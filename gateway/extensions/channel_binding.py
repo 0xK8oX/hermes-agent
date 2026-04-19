@@ -322,6 +322,39 @@ def _apply_binding_unlocked(session_key: str, binding: dict) -> None:
         )
 
 
+def _enrich_from_soul_frontmatter(entry: dict) -> dict:
+    """Enrich a config binding entry with fields from its soul's frontmatter.
+
+    Soul frontmatter is the single source of truth for model, provider,
+    base_url, api_key, skills, and memory_scope.  Config bindings only need
+    ``id`` + ``soul`` — everything else is resolved here.
+
+    Fields already present in *entry* (e.g. temporarily set by /bind save)
+    are **not** overwritten, so an explicit runtime override still wins.
+    """
+    soul_name = entry.get("soul")
+    if not soul_name or not isinstance(soul_name, str):
+        return entry
+
+    result = _load_soul_with_meta(soul_name)
+    if not result:
+        return entry
+
+    _, meta = result
+    if not isinstance(meta, dict) or not meta:
+        return entry
+
+    # Enrich: soul frontmatter fills in anything the config entry lacks
+    for key in ("model", "provider", "base_url", "api_key", "memory_scope"):
+        if key not in entry and meta.get(key):
+            entry[key] = meta[key]
+
+    if "skills" not in entry and meta.get("skills"):
+        entry["skills"] = meta["skills"]
+
+    return entry
+
+
 def _resolve_binding_from_session_key(session_key: str) -> Optional[dict]:
     """Resolve a channel binding from session_key + config.
 
@@ -333,6 +366,10 @@ def _resolve_binding_from_session_key(session_key: str) -> Optional[dict]:
       2. For threads, also try the thread_id (position 5) against config IDs
       3. For threads, also try to match the parent channel's bindings
          by stripping the thread_id and checking the parent chat_id
+
+    After matching, the entry is enriched from the soul's frontmatter so
+    that model/provider/skills/memory_scope come from a single source of
+    truth (the soul .md file) rather than duplicated in config.yaml.
     """
     if not session_key:
         return None
@@ -351,35 +388,33 @@ def _resolve_binding_from_session_key(session_key: str) -> Optional[dict]:
     all_bindings = _get_all_platform_bindings()
     platform_bindings = all_bindings.get(platform, [])
 
+    matched = None
+
     # Strategy 1: exact match on chat_id
     for entry in platform_bindings:
         if not isinstance(entry, dict):
             continue
         entry_id = str(entry.get("id", ""))
         if entry_id == chat_id:
-            return entry
+            matched = entry
+            break
 
     # Strategy 2: for threads, also try thread_id and consider that
     # the session key may use the thread's own ID as chat_id.
-    # In Discord, the parent channel ID is NOT in the session key for threads,
-    # so we check if any binding's ID matches any part of the key.
-    if chat_type == "thread" and thread_id:
-        # The session key for a thread is agent:main:discord:thread:{thread_id}:{thread_id}
-        # We need to check if any binding could be the parent channel.
-        # Since we can't know the parent ID from the session key alone,
-        # we check all bindings that have the same platform.
-        # The Discord adapter handles this via event.extra["channel_binding"]
-        # in Path 1 of _on_new_session, but this fallback helps for
-        # cached/restarted sessions where on_new_session didn't fire.
+    if not matched and chat_type == "thread" and thread_id:
         for entry in platform_bindings:
             if not isinstance(entry, dict):
                 continue
-            # If the entry has a threads list, check if our thread_id is in it
             entry_threads = entry.get("threads", [])
             if isinstance(entry_threads, list) and thread_id in [str(t) for t in entry_threads]:
-                return entry
+                matched = entry
+                break
 
-    return None
+    if not matched:
+        return None
+
+    # Enrich from soul frontmatter (single source of truth)
+    return _enrich_from_soul_frontmatter(matched)
 
 
 def _get_all_platform_bindings() -> Dict[str, list]:
@@ -953,15 +988,11 @@ def _save_binding_to_config(platform: str, channel_id: str, binding: dict) -> st
     if not isinstance(bindings, list):
         bindings = []
 
-    # Build the binding entry to save — only include non-None fields
-    entry: Dict[str, Any] = {"id": channel_id}
-    for key in ("soul", "model", "provider", "base_url", "api_key", "memory_scope"):
-        val = binding.get(key)
-        if val is not None:
-            entry[key] = val
-    skills = binding.get("skills")
-    if skills:
-        entry["skills"] = skills if isinstance(skills, list) else [skills]
+    # Build the binding entry to save — only id + soul.
+    # Model, provider, base_url, api_key, skills, memory_scope are all
+    # resolved from the soul's frontmatter at load time, so there is no
+    # need to duplicate them in config.yaml.
+    entry: Dict[str, Any] = {"id": channel_id, "soul": binding.get("soul")}
 
     # Replace existing entry for same channel_id, or append
     replaced = False
@@ -1051,11 +1082,13 @@ def _list_all_bindings() -> str:
         for entry in bindings:
             if not isinstance(entry, dict):
                 continue
-            chan_id = entry.get("id", "?")
-            soul = entry.get("soul", "—")
-            model = entry.get("model", "")
-            scope = entry.get("memory_scope", "")
-            skills = entry.get("skills", [])
+            # Enrich from soul frontmatter for display
+            enriched = _enrich_from_soul_frontmatter(dict(entry))
+            chan_id = enriched.get("id", "?")
+            soul = enriched.get("soul", "—")
+            model = enriched.get("model", "")
+            scope = enriched.get("memory_scope", "")
+            skills = enriched.get("skills", [])
             detail = f"  • `{chan_id}` → soul: `{soul}`"
             if model:
                 detail += f" | model: `{model}`"
@@ -1124,22 +1157,10 @@ async def handle_bind_command(session_store, event) -> str:
                 "First set a soul with `/bind <soul_name>`, then use `/bind save` to persist it."
             )
 
-        # Build the config entry from current session state.
-        # Use api_key_raw (the original ${ENV_VAR} reference) if available,
-        # to avoid writing expanded secrets into config.yaml.
+        # Build the config entry: only id + soul needed.
+        # All other fields (model, provider, skills, memory_scope) are
+        # resolved from the soul's frontmatter at load time.
         entry: Dict[str, Any] = {"soul": current_soul}
-        if current_model_override:
-            for key in ("model", "provider", "base_url"):
-                val = current_model_override.get(key)
-                if val:
-                    entry[key] = val
-            raw_key = current_model_override.get("api_key_raw")
-            if raw_key:
-                entry["api_key"] = raw_key
-        if current_skills:
-            entry["skills"] = current_skills
-        if current_memory_scope:
-            entry["memory_scope"] = current_memory_scope
 
         error = _save_binding_to_config(platform, channel_id, entry)
         if error:
