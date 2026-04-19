@@ -38,6 +38,9 @@ def _ensure_telegram_mock():
     mod.error.NetworkError = type("NetworkError", (OSError,), {})
     mod.error.TimedOut = type("TimedOut", (OSError,), {})
     mod.error.BadRequest = type("BadRequest", (Exception,), {})
+    # Provide stub classes for InlineKeyboard* so approval button code works.
+    mod.InlineKeyboardButton = lambda text, **kw: {"text": text, **kw}
+    mod.InlineKeyboardMarkup = lambda keyboard=None, **kw: {"inline_keyboard": keyboard}
 
     for name in ("telegram", "telegram.ext", "telegram.constants", "telegram.request"):
         sys.modules.setdefault(name, mod)
@@ -175,6 +178,11 @@ class TestTelegramExecApproval:
 class TestTelegramApprovalCallback:
     """Test the approval callback handling in _handle_callback_query."""
 
+    @pytest.fixture(autouse=True)
+    def _clear_allowed_users(self, monkeypatch):
+        """Clear TELEGRAM_ALLOWED_USERS so the admin guard doesn't block."""
+        monkeypatch.delenv("TELEGRAM_ALLOWED_USERS", raising=False)
+
     @pytest.mark.asyncio
     async def test_resolves_approval_on_click(self):
         adapter = _make_adapter()
@@ -187,6 +195,7 @@ class TestTelegramApprovalCallback:
         query.message = MagicMock()
         query.message.chat_id = 12345
         query.from_user = MagicMock()
+        query.from_user.id = 12345
         query.from_user.first_name = "Norbert"
         query.answer = AsyncMock()
         query.edit_message_text = AsyncMock()
@@ -215,6 +224,7 @@ class TestTelegramApprovalCallback:
         query.message = MagicMock()
         query.message.chat_id = 12345
         query.from_user = MagicMock()
+        query.from_user.id = 12345
         query.from_user.first_name = "Alice"
         query.answer = AsyncMock()
         query.edit_message_text = AsyncMock()
@@ -240,6 +250,7 @@ class TestTelegramApprovalCallback:
         query.message = MagicMock()
         query.message.chat_id = 12345
         query.from_user = MagicMock()
+        query.from_user.id = 12345
         query.from_user.first_name = "Bob"
         query.answer = AsyncMock()
 

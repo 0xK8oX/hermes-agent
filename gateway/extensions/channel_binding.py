@@ -18,6 +18,7 @@ Config format (in config.yaml, under {platform}.extra):
         base_url: "https://..."                  # optional base URL
         api_key: "${API_KEY}"                    # optional, env-var expanded
         memory_scope: "dev"                      # scoped memory dir
+        # Special values: "*" = all scopes, "-" = skip _global/ (isolation)
 
 Supported platforms: Discord, Telegram, WhatsApp (and any future platform
 that routes through the gateway command dispatcher).
@@ -38,6 +39,7 @@ Memory architecture:
     └── ...
 
     memory_scope: "*"  → God mode, reads ALL scopes
+    memory_scope: "-"  → skip _global/ (isolation mode — no shared context)
     memory_scope omitted → default (unscoped, backward compatible)
 
 Resolution:
@@ -87,13 +89,41 @@ _session_memory_scopes: Dict[str, str] = {}
 # Config cache for cross-platform binding resolution (invalidated on /reset)
 _CONFIG_BINDINGS_CACHE: Optional[Dict[str, list]] = None
 
+# O(1) index for bound-channel lookup: {(platform, chat_id): True}
+_bound_channel_index: Dict[tuple, bool] = {}
+
 
 # ---------------------------------------------------------------------------
 # Soul loading
 # ---------------------------------------------------------------------------
 
 def _load_soul_content(soul_name: str) -> Optional[str]:
-    """Load soul content from ~/.hermes/souls/<soul_name>.md."""
+    """Load soul content from ~/.hermes/souls/<soul_name>.md.
+
+    Returns only the body text (frontmatter stripped).
+    Use ``_load_soul_with_meta()`` if you also need the metadata.
+    """
+    result = _load_soul_with_meta(soul_name)
+    return result[0] if result else None
+
+
+def _load_soul_with_meta(soul_name: str) -> Optional[tuple]:
+    """Load soul file and return (content, metadata_dict).
+
+    Soul files may include YAML frontmatter between ``---`` delimiters::
+
+        ---
+        memory_scope: accountant
+        skills:
+          - productivity/professional-pdf-generation
+          - email/himalaya
+        ---
+
+        (soul body follows)
+
+    If no frontmatter is present, returns ``(content, {})``.
+    Returns ``None`` if the file does not exist or is empty.
+    """
     if "\x00" in soul_name or "/" in soul_name or "\\" in soul_name or ".." in soul_name:
         logger.warning("[ChannelBinding] Invalid soul name (path traversal): %s", soul_name)
         return None
@@ -109,11 +139,41 @@ def _load_soul_content(soul_name: str) -> Optional[str]:
         return None
 
     try:
-        content = soul_path.read_text(encoding="utf-8").strip()
-        return content if content else None
+        raw = soul_path.read_text(encoding="utf-8").strip()
+        if not raw:
+            return None
     except Exception as e:
         logger.warning("[ChannelBinding] Failed to load soul '%s': %s", soul_name, e)
         return None
+
+    # Parse optional YAML frontmatter
+    metadata: Dict[str, Any] = {}
+    content = raw
+
+    if raw.startswith("---"):
+        parts = raw.split("---", 2)
+        if len(parts) >= 3:
+            yaml_block = parts[1].strip()
+            content = parts[2].strip()
+            if yaml_block:
+                if len(yaml_block) > 65536:
+                    logger.warning(
+                        "[ChannelBinding] Soul frontmatter exceeds 64KB limit (%d bytes), skipping",
+                        len(yaml_block),
+                    )
+                else:
+                    try:
+                        import yaml
+                        parsed = yaml.safe_load(yaml_block)
+                        if isinstance(parsed, dict):
+                            metadata = parsed
+                    except Exception:
+                        logger.warning(
+                            "[ChannelBinding] Invalid YAML frontmatter in soul '%s', treating as no frontmatter",
+                            soul_name,
+                        )
+
+    return (content if content else None, metadata)
 
 
 def _expand_api_key(raw: Optional[str]) -> Optional[str]:
@@ -163,12 +223,18 @@ def _apply_binding_unlocked(session_key: str, binding: dict) -> None:
     skills = binding.get("skills")
     memory_scope = binding.get("memory_scope")
 
-    # Store the raw binding for /reset restore
-    _session_bindings[session_key] = binding
+    # Store the raw binding for /reset restore (strip ephemeral _content to avoid
+    # polluting the dict with potentially large soul text).
+    _session_bindings[session_key] = {k: v for k, v in binding.items() if k != "_content"}
 
-    # Load soul content
+    # Maintain O(1) bound-channel index for is_channel_bound()
+    parsed = _parse_session_key(session_key)
+    if parsed and parsed.get("platform") and parsed.get("channel_id"):
+        _bound_channel_index[(parsed["platform"], parsed["channel_id"])] = True
+
+    # Load soul content (use pre-loaded content if caller already read the file)
     if soul_name and isinstance(soul_name, str):
-        content = _load_soul_content(soul_name)
+        content = binding.get("_content") or _load_soul_content(soul_name)
         if content:
             _session_souls[session_key] = content
             _session_soul_names[session_key] = soul_name
@@ -188,12 +254,14 @@ def _apply_binding_unlocked(session_key: str, binding: dict) -> None:
                 _session_skills[session_key], session_key[:30],
             )
 
-    # Store model override
+    # Store model override (keep raw api_key for safe /bind save)
     if model:
+        raw_api_key = binding.get("api_key")
         _session_model_overrides[session_key] = {
             "model": model,
             "provider": binding.get("provider"),
-            "api_key": _expand_api_key(binding.get("api_key")),
+            "api_key": _expand_api_key(raw_api_key),
+            "api_key_raw": raw_api_key,
             "base_url": binding.get("base_url"),
             "api_mode": None,
         }
@@ -373,6 +441,9 @@ def _on_session_reset(session_key: str) -> None:
 def _on_session_cleanup(session_key: str) -> None:
     """Remove all per-session state for an expired session."""
     with _state_lock:
+        parsed = _parse_session_key(session_key)
+        if parsed and parsed.get("platform") and parsed.get("channel_id"):
+            _bound_channel_index.pop((parsed["platform"], parsed["channel_id"]), None)
         _session_souls.pop(session_key, None)
         _session_model_overrides.pop(session_key, None)
         _session_soul_names.pop(session_key, None)
@@ -381,14 +452,38 @@ def _on_session_cleanup(session_key: str) -> None:
         _session_memory_scopes.pop(session_key, None)
 
 
+def _ensure_binding_loaded(session_key: str) -> None:
+    """Lazy-init: if session_key has no cached binding, resolve from config.
+
+    After a gateway restart, the in-memory dicts (_session_souls, etc.) are
+    empty.  For *existing* sessions ``on_new_session`` never fires, so this
+    fallback ensures the binding is loaded on first access.
+    """
+    with _state_lock:
+        if session_key in _session_bindings:
+            return  # already populated
+
+    binding = _resolve_binding_from_session_key(session_key)
+    if binding and isinstance(binding, dict):
+        _apply_binding(session_key, binding)
+
+
 def _get_model_override(session_key: str) -> Optional[Dict[str, Optional[str]]]:
     """Return the channel binding model override for a session, or None."""
+    _ensure_binding_loaded(session_key)
     with _state_lock:
         return _session_model_overrides.get(session_key)
 
 
 def _get_ephemeral(session_key: str) -> Optional[str]:
-    """Return the per-session soul override content, or None."""
+    """Return the per-session soul override content, or None.
+
+    Includes a lazy-resolution fallback: if the in-memory dict has no entry
+    (e.g. after a gateway restart where ``on_new_session`` never fires for
+    an existing session), we resolve the binding from config on the spot,
+    populate the dict, and return the content.
+    """
+    _ensure_binding_loaded(session_key)
     with _state_lock:
         return _session_souls.get(session_key)
 
@@ -399,6 +494,7 @@ def _get_skills_override(session_key: str) -> Optional[List[str]]:
     Used by gateway/run.py to inject skills into new sessions.
     An empty list means "all skills" (God mode).
     """
+    _ensure_binding_loaded(session_key)
     with _state_lock:
         return _session_skills.get(session_key)
 
@@ -414,25 +510,9 @@ def _get_memory_scope(session_key: str) -> Optional[str]:
     Falls back to re-resolving from config if not cached (e.g. after
     process restart, where in-memory state is lost for existing sessions).
     """
+    _ensure_binding_loaded(session_key)
     with _state_lock:
-        scope = _session_memory_scopes.get(session_key)
-        if scope is not None:
-            return scope
-
-    # Fallback: re-resolve binding from session key + config (outside lock)
-    binding = _resolve_binding_from_session_key(session_key)
-    if binding and isinstance(binding, dict):
-        memory_scope = binding.get("memory_scope")
-        if memory_scope and isinstance(memory_scope, str):
-            with _state_lock:
-                _session_memory_scopes[session_key] = memory_scope
-            logger.info(
-                "[ChannelBinding] Memory scope '%s' re-resolved for session %s",
-                memory_scope, session_key[:30],
-            )
-            return memory_scope
-
-    return None
+        return _session_memory_scopes.get(session_key)
 
 
 # ---------------------------------------------------------------------------
@@ -443,9 +523,11 @@ def resolve_memory_dirs(scope: Optional[str]) -> List[Path]:
     """Resolve memory directories for a given scope.
 
     Returns a list of directories to read, in priority order:
-      - ``_global/`` always first (shared context)
+      - ``_global/`` always first (shared context), unless scope is ``-``
       - Scoped directory (if scope is a named scope like "dev")
       - ALL scope directories (if scope is "*")
+
+    When scope is ``-``, only reads the scoped directory and skips _global/.
 
     This function is the public API used by run_agent.py to pass
     memory directories to MemoryStore.
@@ -455,13 +537,21 @@ def resolve_memory_dirs(scope: Optional[str]) -> List[Path]:
         base = get_hermes_home() / "memories"
     except ImportError:
         base = Path.home() / ".hermes" / "memories"
-
     dirs: List[Path] = []
 
-    # _global/ is always included
-    global_dir = base / "_global"
-    if global_dir.exists():
-        dirs.append(global_dir)
+    # _global/ is included unless scope is "-" (skip global)
+    if scope != "-":
+        global_dir = base / "_global"
+        if global_dir.exists():
+            dirs.append(global_dir)
+
+    if scope == "-":
+        # Isolation mode — skip _global/ entirely.
+        # Return a dedicated isolation dir to avoid reading unscoped files
+        # from the base memories directory.  MemoryStore requires at least one dir.
+        isolation_dir = base / "_isolated"
+        isolation_dir.mkdir(parents=True, exist_ok=True)
+        return [isolation_dir]
 
     if not scope or not scope.strip():
         # No scope (or whitespace-only) — read from base dir (backward compatible)
@@ -647,6 +737,84 @@ def _validate_bindings() -> None:
         logger.info("[ChannelBinding] Startup: all %d binding(s) validated OK", len(all_bindings))
 
 
+def _get_cron_binding(origin: dict) -> Optional[dict]:
+    """Resolve channel binding overrides for a cron job from its origin.
+
+    Called by ``cron/scheduler.py:run_job()`` to inherit the soul, model,
+    and provider of the bound channel where the cron job was created.
+
+    Args:
+        origin: dict with keys ``platform``, ``chat_id`` (and optionally
+                ``thread_id``, ``chat_name``).
+
+    Returns:
+        dict with any of: ``model``, ``provider``, ``api_key``, ``base_url``,
+        ``soul_content``, ``skills``, ``memory_scope`` — or ``None`` if no
+        binding exists for this channel.
+    """
+    if not origin or not isinstance(origin, dict):
+        return None
+
+    platform = origin.get("platform")
+    chat_id = str(origin.get("chat_id", ""))
+    thread_id = origin.get("thread_id")
+    if not platform or not chat_id:
+        return None
+
+    # Build a session key that _resolve_binding_from_session_key can parse.
+    # For groups: agent:main:{platform}:group:{chat_id}
+    # For threads: agent:main:{platform}:thread:{thread_id}:{thread_id}
+    chat_type = "thread" if thread_id else "group"
+    effective_id = str(thread_id) if thread_id else chat_id
+    session_key = f"agent:main:{platform}:{chat_type}:{effective_id}"
+    if thread_id:
+        session_key += f":{thread_id}"
+
+    _ensure_binding_loaded(session_key)
+
+    result: Dict[str, Any] = {}
+
+    def _read_binding_state(key: str) -> None:
+        """Read binding state from in-memory dicts into result."""
+        mo = _session_model_overrides.get(key)
+        if mo:
+            if mo.get("model"):
+                result["model"] = mo["model"]
+            if mo.get("provider"):
+                result["provider"] = mo["provider"]
+            # Use api_key_raw (${ENV_VAR} reference) instead of the expanded
+            # plaintext secret — let the consumer expand at point of use.
+            raw_key = mo.get("api_key_raw")
+            if raw_key:
+                result["api_key"] = raw_key
+            elif mo.get("api_key"):
+                result["api_key"] = mo["api_key"]
+            if mo.get("base_url"):
+                result["base_url"] = mo["base_url"]
+        soul = _session_souls.get(key)
+        if soul:
+            result["soul_content"] = soul
+        skills = _session_skills.get(key)
+        if skills is not None:
+            result["skills"] = skills
+        mem = _session_memory_scopes.get(key)
+        if mem:
+            result["memory_scope"] = mem
+
+    with _state_lock:
+        _read_binding_state(session_key)
+
+    if not result:
+        # Fallback: for threads, try the parent group channel binding
+        if thread_id:
+            parent_key = f"agent:main:{platform}:group:{chat_id}"
+            _ensure_binding_loaded(parent_key)
+            with _state_lock:
+                _read_binding_state(parent_key)
+
+    return result if result else None
+
+
 # ---------------------------------------------------------------------------
 # Register all hooks
 # ---------------------------------------------------------------------------
@@ -658,6 +826,7 @@ register_hook("get_model_override", _get_model_override)
 register_hook("get_ephemeral", _get_ephemeral)
 register_hook("get_skills_override", _get_skills_override)
 register_hook("get_memory_scope", _get_memory_scope)
+register_hook("get_cron_binding", _get_cron_binding)
 
 # Run startup validation
 _validate_bindings()
@@ -683,7 +852,7 @@ def _parse_session_key(session_key: str) -> Optional[Dict[str, str]]:
     return {
         "platform": parts[2],
         "chat_type": parts[3],
-        "channel_id": parts[4] if len(parts) > 4 else None,
+        "channel_id": parts[4],
     }
 
 
@@ -789,7 +958,7 @@ def _remove_binding_from_config(platform: str, channel_id: str) -> str | None:
 
     platform_cfg = config.get(platform)
     if not isinstance(platform_cfg, dict):
-        return "⚠️ No config section found for platform '{platform}'."
+        return f"⚠️ No config section found for platform '{platform}'."
 
     extra = platform_cfg.get("extra")
     if not isinstance(extra, dict):
@@ -875,7 +1044,9 @@ async def handle_bind_command(session_store, event) -> str:
     args = event.get_command_args().strip()
     source = event.source
     session_entry = session_store.get_or_create_session(source)
-    session_key = session_entry.session_id or source
+    session_key = session_entry.session_key
+    if not session_key:
+        return "⚠️ Session key unavailable. Please try again."
     parsed = _parse_session_key(session_key)
 
     # ── Subcommands ──────────────────────────────────────────────────────
@@ -905,13 +1076,18 @@ async def handle_bind_command(session_store, event) -> str:
                 "First set a soul with `/bind <soul_name>`, then use `/bind save` to persist it."
             )
 
-        # Build the config entry from current session state
+        # Build the config entry from current session state.
+        # Use api_key_raw (the original ${ENV_VAR} reference) if available,
+        # to avoid writing expanded secrets into config.yaml.
         entry: Dict[str, Any] = {"soul": current_soul}
         if current_model_override:
-            for key in ("model", "provider", "base_url", "api_key"):
+            for key in ("model", "provider", "base_url"):
                 val = current_model_override.get(key)
                 if val:
                     entry[key] = val
+            raw_key = current_model_override.get("api_key_raw")
+            if raw_key:
+                entry["api_key"] = raw_key
         if current_skills:
             entry["skills"] = current_skills
         if current_memory_scope:
@@ -921,9 +1097,15 @@ async def handle_bind_command(session_store, event) -> str:
         if error:
             return error
 
+        # Signal to the gateway wrapper that a full session reset is needed
+        if not hasattr(event, "extra") or event.extra is None:
+            event.extra = {}
+        event.extra["_bind_reset"] = True
+
         return (
             f"✅ Binding saved to config.yaml!\n"
             f"Platform: `{platform}` | Channel: `{channel_id}` | Soul: `{current_soul}`\n"
+            f"🧹 Session cleared — fresh context for the new soul.\n"
             f"_(persists across gateway restarts)_"
         )
 
@@ -946,6 +1128,7 @@ async def handle_bind_command(session_store, event) -> str:
             _session_model_overrides.pop(session_key, None)
             _session_skills.pop(session_key, None)
             _session_memory_scopes.pop(session_key, None)
+            _bound_channel_index.pop((platform, channel_id), None)
 
         if error:
             return f"{error}\n🔓 Runtime binding cleared anyway — using default personality."
@@ -967,22 +1150,25 @@ async def handle_bind_command(session_store, event) -> str:
             _session_model_overrides.pop(session_key, None)
             _session_skills.pop(session_key, None)
             _session_memory_scopes.pop(session_key, None)
+            if parsed:
+                _bound_channel_index.pop(
+                    (parsed.get("platform", ""), parsed.get("channel_id", "")), None
+                )
         return "🔓 Soul binding cleared — using default personality.\n_(takes effect on next message)_"
 
     # /bind <soul_name>
     if args:
         # Reject subcommand-like args to prevent confusion
         if args in ("save", "list", "unbind", "--clear"):
-            pass  # already handled above; shouldn't reach here
+            return "⚠️ Unexpected state — please retry."  # safety net
         soul_name = args.lower().strip()
-        content = _load_soul_content(soul_name)
-        if not content:
+        result = _load_soul_with_meta(soul_name)
+        if not result or not result[0]:
             # List available souls as hint
             try:
                 from hermes_constants import get_hermes_home
                 souls_dir = get_hermes_home() / "souls"
             except ImportError:
-                from pathlib import Path
                 souls_dir = Path.home() / ".hermes" / "souls"
             available = []
             if souls_dir.exists():
@@ -990,12 +1176,46 @@ async def handle_bind_command(session_store, event) -> str:
             soul_list = ", ".join(f"`{s}`" for s in available) if available else "(none found)"
             return f"⚠️ Soul `{soul_name}` not found in ~/.hermes/souls/\n\nAvailable: {soul_list}"
 
-        # Apply the binding (soul only, no model override for dynamic bind)
-        binding = {"soul": soul_name}
+        # Build binding from soul file frontmatter + soul name
+        _content, meta = result
+        binding: Dict[str, Any] = {"soul": soul_name, "_content": _content}
+        if meta.get("memory_scope"):
+            binding["memory_scope"] = meta["memory_scope"]
+        if meta.get("skills"):
+            binding["skills"] = meta["skills"]
+        if meta.get("model"):
+            binding["model"] = meta["model"]
+        if meta.get("provider"):
+            binding["provider"] = meta["provider"]
+        if meta.get("base_url"):
+            binding["base_url"] = meta["base_url"]
+        if meta.get("api_key"):
+            binding["api_key"] = meta["api_key"]
+
         _apply_binding(session_key, binding)
+
+        # Signal to the gateway wrapper that a full session reset is needed
+        # (evict cached agent, clear model overrides, flush memories, etc.)
+        # We cannot do this here because we don't have access to the gateway
+        # instance — the gateway's _handle_bind_command wrapper will pick this
+        # up and call _perform_session_reset().
+        if not hasattr(event, "extra") or event.extra is None:
+            event.extra = {}
+        event.extra["_bind_reset"] = True
+
+        extras = []
+        if binding.get("memory_scope"):
+            extras.append(f"memory: `{binding['memory_scope']}`")
+        if binding.get("skills"):
+            extras.append(f"skills: {len(binding['skills'])}")
+        if binding.get("model"):
+            extras.append(f"model: `{binding['model']}`")
+        extra_line = f" ({', '.join(extras)})" if extras else ""
+
         return (
-            f"🎭 Soul set to **{soul_name}** for this session.\n"
-            f"_(takes effect on next message — use `/bind save` to persist)_"
+            f"🎭 Soul set to **{soul_name}** for this session{extra_line}.\n"
+            f"🧹 Session cleared — fresh context.\n"
+            f"_(use `/bind save` to persist)_"
         )
 
     # /bind (no args) — show current binding
@@ -1028,3 +1248,44 @@ async def handle_bind_command(session_store, event) -> str:
         "`/bind unbind` remove | `/bind --clear` session-only clear"
     )
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Public helpers for authorization
+# ---------------------------------------------------------------------------
+
+def is_channel_bound(platform: str, chat_id: str) -> bool:
+    """Check if a group/channel has any binding (config or dynamic).
+
+    Used by ``_is_user_authorized()`` to auto-open bound groups —
+    if an admin has ``/bind``-ed a soul in a group, all group members
+    are authorized to chat (no need for explicit allowlisting).
+
+    Uses an O(1) index maintained alongside ``_session_bindings``
+    for runtime bindings, then falls back to config-based lookup.
+
+    Args:
+        platform: lowercase platform name (e.g. "whatsapp", "telegram")
+        chat_id: the chat/channel/group ID to check
+
+    Returns:
+        True if the channel has a config binding or a live runtime binding.
+    """
+    if not platform or not chat_id:
+        return False
+
+    # O(1) index check (covers runtime bindings)
+    with _state_lock:
+        if (platform, str(chat_id)) in _bound_channel_index:
+            return True
+
+    # Config-based (persisted /bind save) bindings fallback
+    all_bindings = _get_all_platform_bindings()
+    platform_bindings = all_bindings.get(platform, [])
+    for entry in platform_bindings:
+        if not isinstance(entry, dict):
+            continue
+        if str(entry.get("id", "")) == str(chat_id):
+            return True
+
+    return False

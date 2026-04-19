@@ -845,6 +845,23 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
             message = format_runtime_provider_error(exc)
             raise RuntimeError(message) from exc
 
+        from agent.smart_model_routing import resolve_turn_route
+        turn_route = resolve_turn_route(
+            prompt,
+            smart_routing,
+            {
+                "model": model,
+                "api_key": runtime.get("api_key"),
+                "base_url": runtime.get("base_url"),
+                "provider": runtime.get("provider"),
+                "api_mode": runtime.get("api_mode"),
+                "command": runtime.get("command"),
+                "args": list(runtime.get("args") or []),
+            },
+        )
+
+        # --- Channel binding inheritance (will be consolidated in later commit) ---
+
         fallback_model = _cfg.get("fallback_providers") or _cfg.get("fallback_model") or None
         credential_pool = None
         runtime_provider = str(runtime.get("provider") or "").strip().lower()

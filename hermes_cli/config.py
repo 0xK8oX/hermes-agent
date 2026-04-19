@@ -1614,6 +1614,14 @@ OPTIONAL_ENV_VARS = {
         "category": "messaging",
         "advanced": True,
     },
+    "GATEWAY_ADMIN_USERS": {
+        "description": "Comma-separated list of user IDs with admin privileges. Admin-only commands: /bind, /model, /provider, /restart, /stop, /profile, /yolo, /personality, /update, /debug, /reload-mcp, /sethome. If not set, all authorized users can run these commands.",
+        "prompt": "Admin user IDs (comma-separated)",
+        "url": None,
+        "password": False,
+        "category": "messaging",
+        "advanced": True,
+    },
     "API_SERVER_ENABLED": {
         "description": "Enable the OpenAI-compatible API server (true/false). Allows frontends like Open WebUI, LobeChat, etc. to connect.",
         "prompt": "Enable API server (true/false)",

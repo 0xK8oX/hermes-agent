@@ -293,6 +293,11 @@ from gateway.restart import (
     parse_restart_drain_timeout,
 )
 
+try:
+    from gateway.extensions.channel_binding import is_channel_bound
+except ImportError:
+    is_channel_bound = None  # type: ignore[assignment]
+
 
 def _normalize_whatsapp_identifier(value: str) -> str:
     """Strip WhatsApp JID/LID syntax down to its stable numeric identifier."""
@@ -2871,10 +2876,12 @@ class GatewayRunner:
         
         Checks in order:
         1. Per-platform allow-all flag (e.g., DISCORD_ALLOW_ALL_USERS=true)
-        2. Environment variable allowlists (TELEGRAM_ALLOWED_USERS, etc.)
-        3. DM pairing approved list
-        4. Global allow-all (GATEWAY_ALLOW_ALL_USERS=true)
-        5. Default: deny
+        2. Bound groups (if admin /bind-ed a soul → group is auto-open)
+        3. Per-platform open groups env var (WHATSAPP_OPEN_GROUPS fallback)
+        4. DM pairing approved list
+        5. Environment variable allowlists (TELEGRAM_ALLOWED_USERS, etc.)
+        6. Global allow-all (GATEWAY_ALLOW_ALL_USERS=true)
+        7. Default: deny
         """
         # Home Assistant events are system-generated (state changes), not
         # user-initiated messages.  The HASS_TOKEN already authenticates the
@@ -2955,6 +2962,17 @@ class GatewayRunner:
         ):
             return True
 
+        # Bound groups: if admin /bind-ed a soul in this group, auto-open
+        # for ALL members — no need for explicit allowlisting or env vars.
+        if is_channel_bound and source.chat_type == "group" and source.chat_id:
+            platform_name = source.platform.value if source.platform else ""
+            if is_channel_bound(platform_name, source.chat_id):
+                logger.info(
+                    "User %s (%s) authorized via bound group %s/%s",
+                    source.user_id, source.user_name, platform_name, source.chat_id,
+                )
+                return True
+
         # Check pairing store (always checked, regardless of allowlists)
         platform_name = source.platform.value if source.platform else ""
         if self.pairing_store.is_approved(platform_name, user_id):
@@ -3009,6 +3027,56 @@ class GatewayRunner:
                 check_ids.add(normalized_user_id)
 
         return bool(check_ids & allowed_ids)
+
+    # Commands that require admin privileges (GATEWAY_ADMIN_USERS).
+    # If GATEWAY_ADMIN_USERS is not set, all authorized users can run these.
+    _ADMIN_COMMANDS = frozenset({
+        "bind", "model", "provider", "restart", "stop",
+        "profile", "yolo", "personality",
+        "update", "debug", "reload-mcp", "sethome",
+    })
+
+    def _is_admin_user(self, source: SessionSource) -> bool:
+        """
+        Check if a user has admin privileges.
+
+        Admin check logic:
+        1. GATEWAY_ADMIN_USERS env var set → user must be in the list
+        2. GATEWAY_ADMIN_USERS not set → all authorized users are admins
+           (backward compatible: no behavior change if not configured)
+
+        Follows the same ID matching logic as _is_user_authorized
+        (bare-ID extraction, WhatsApp alias expansion).
+        """
+        admin_list = os.getenv("GATEWAY_ADMIN_USERS", "").strip()
+        if not admin_list:
+            # No admin list configured → everyone authorized is an admin
+            return True
+
+        user_id = source.user_id
+        if not user_id:
+            return False
+
+        admin_ids = {uid.strip() for uid in admin_list.split(",") if uid.strip()}
+        check_ids = {user_id}
+        if "@" in user_id:
+            check_ids.add(user_id.split("@")[0])
+
+        # WhatsApp: resolve phone↔LID aliases (expand BOTH sides, like _is_user_authorized)
+        if source.platform == Platform.WHATSAPP:
+            # Expand user's own IDs
+            check_ids.update(_expand_whatsapp_auth_aliases(user_id))
+            normalized_user_id = _normalize_whatsapp_identifier(user_id)
+            if normalized_user_id:
+                check_ids.add(normalized_user_id)
+            # Expand admin list entries too (admin_ids may contain phone or LID)
+            expanded = set()
+            for uid in admin_ids:
+                expanded.add(uid)
+                expanded.update(_expand_whatsapp_auth_aliases(uid))
+            admin_ids = expanded
+
+        return bool(check_ids & admin_ids)
 
     def _get_unauthorized_dm_behavior(self, platform: Optional[Platform]) -> str:
         """Return how unauthorized DMs should be handled for a platform.
@@ -3229,6 +3297,8 @@ class GatewayRunner:
             _cmd_def_inner = _resolve_cmd_inner(_evt_cmd) if _evt_cmd else None
 
             if _cmd_def_inner and _cmd_def_inner.name == "restart":
+                if not self._is_admin_user(source):
+                    return "🔒 This command is admin-only. You don't have permission to use it."
                 return await self._handle_restart_command(event)
 
             # /stop must hard-kill the session when an agent is running.
@@ -3431,6 +3501,9 @@ class GatewayRunner:
             if running_agent is _AGENT_PENDING_SENTINEL:
                 # Agent is being set up but not ready yet.
                 if event.get_command() == "stop":
+                    # Admin check for sentinel stop (mirrors the guard above for running agents).
+                    if not self._is_admin_user(source):
+                        return "🔒 This command is admin-only. You don't have permission to use it."
                     # Force-clean the sentinel so the session is unlocked.
                     self._release_running_agent_state(_quick_key)
                     logger.info("HARD STOP (pending) for session %s — sentinel cleared", _quick_key[:20])
@@ -3480,6 +3553,14 @@ class GatewayRunner:
         # Resolve aliases to canonical name so dispatch only checks canonicals.
         _cmd_def = _resolve_cmd(command) if command else None
         canonical = _cmd_def.name if _cmd_def else command
+
+        # Admin-only command guard: reject non-admin users for sensitive commands.
+        if canonical in self._ADMIN_COMMANDS and not self._is_admin_user(source):
+            logger.warning(
+                "Non-admin user %s (%s) attempted admin command: /%s on %s",
+                source.user_id, source.user_name, canonical, source.platform.value,
+            )
+            return "🔒 This command is admin-only. You don't have permission to use it."
 
         if canonical == "new":
             return await self._handle_reset_command(event)
@@ -4896,11 +4977,13 @@ class GatewayRunner:
 
         return "\n".join(lines)
 
-    async def _handle_reset_command(self, event: MessageEvent) -> str:
-        """Handle /new or /reset command."""
+    async def _perform_session_reset(self, event: MessageEvent) -> None:
+        """Full session reset — evict agent, clear overrides, fire hooks.
+
+        Extracted from ``_handle_reset_command`` so that ``/bind`` can reuse
+        the same cleanup logic without returning a reset message.
+        """
         source = event.source
-        
-        # Get existing session key
         session_key = self._session_key_for_source(source)
         self._invalidate_session_run_generation(session_key, reason="session_reset")
         
@@ -4916,9 +4999,8 @@ class GatewayRunner:
                 _flush_task.add_done_callback(self._background_tasks.discard)
         except Exception as e:
             logger.debug("Gateway memory flush on reset failed: %s", e)
-        # Close tool resources on the old agent (terminal sandboxes, browser
-        # daemons, background processes) before evicting from cache.
-        # Guard with getattr because test fixtures may skip __init__.
+
+        # Close tool resources on the old agent before evicting from cache.
         _cache_lock = getattr(self, "_agent_cache_lock", None)
         if _cache_lock is not None:
             with _cache_lock:
@@ -4941,7 +5023,8 @@ class GatewayRunner:
             pass
 
         # Reset the session
-        new_entry = self.session_store.reset_session(session_key)
+        old_entry = self.session_store._entries.get(session_key)
+        self.session_store.reset_session(session_key)
 
         # Clear any session-scoped model override so the next agent picks up
         # the configured default instead of the previously switched model.
@@ -4960,26 +5043,31 @@ class GatewayRunner:
         except Exception:
             pass
 
-        # Emit session:end hook (session is ending)
+        # Emit session:end and session:reset hooks
         await self.hooks.emit("session:end", {
             "platform": source.platform.value if source.platform else "",
             "user_id": source.user_id,
             "session_key": session_key,
         })
-
-        # Emit session:reset hook
         await self.hooks.emit("session:reset", {
             "platform": source.platform.value if source.platform else "",
             "user_id": source.user_id,
             "session_key": session_key,
         })
 
-        # Resolve session config info to surface to the user
+    async def _handle_reset_command(self, event: MessageEvent) -> str:
+        """Handle /new or /reset command."""
+        # Perform the full cleanup
+        await self._perform_session_reset(event)
+
+        source = event.source
+        session_key = self._session_key_for_source(source)
         try:
             session_info = self._format_session_info()
         except Exception:
             session_info = ""
 
+        new_entry = self.session_store._entries.get(session_key)
         if new_entry:
             header = "✨ Session reset! Starting fresh."
         else:
@@ -5853,9 +5941,29 @@ class GatewayRunner:
         return f"Unknown personality: `{args}`\n\nAvailable: {available}"
 
     async def _handle_bind_command(self, event: MessageEvent) -> str:
-        """Delegate to channel_binding extension's /bind handler."""
+        """Delegate to channel_binding extension's /bind handler.
+
+        When /bind changes the soul (or /bind save persists), the handler
+        requests a full session reset via ``event.extra["_bind_reset"]``
+        so we perform the same cleanup as /new — evict cached agent, clear
+        model overrides, flush memories, etc.
+        """
         from gateway.extensions.channel_binding import handle_bind_command
-        return await handle_bind_command(self.session_store, event)
+        result = await handle_bind_command(self.session_store, event)
+
+        # If the handler signalled a soul change requiring session reset,
+        # perform the full /new-equivalent cleanup here where we have
+        # access to the gateway instance (self).
+        # Wrap in try/except so the user always sees the bind result,
+        # even if cleanup fails (bind is already committed).
+        if getattr(event, "extra", None) and event.extra.get("_bind_reset"):
+            event.extra.pop("_bind_reset", None)
+            try:
+                await self._perform_session_reset(event)
+            except Exception:
+                logger.exception("Session reset after /bind failed")
+
+        return result
     
     async def _handle_retry_command(self, event: MessageEvent) -> str:
         """Handle /retry command - re-send the last user message."""

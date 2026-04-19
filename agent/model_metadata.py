@@ -132,6 +132,7 @@ DEFAULT_CONTEXT_LENGTHS = {
     "llama": 131072,
     # Qwen — specific model families before the catch-all.
     # Official docs: https://help.aliyun.com/zh/model-studio/developer-reference/
+    "qwen3.5-plus": 1000000,     # 1M context (your info: 1M total, 65K output)
     "qwen3-coder-plus": 1000000,  # 1M context
     "qwen3-coder": 262144,        # 256K context
     "qwen": 131072,
@@ -148,7 +149,7 @@ DEFAULT_CONTEXT_LENGTHS = {
     # matches "grok-4.20-0309-reasoning" / "-non-reasoning" / "-multi-agent-0309".
     "grok-code-fast": 256000,   # grok-code-fast-1
     "grok-4-1-fast": 2000000,   # grok-4-1-fast-(non-)reasoning
-    "grok-2-vision": 8192,      # grok-2-vision, -1212, -latest
+    "grok-2-vision": 131072,    # grok-2-vision, -1212, -latest (128K per xAI docs)
     "grok-4-fast": 2000000,     # grok-4-fast-(non-)reasoning
     "grok-4.20": 2000000,       # grok-4.20-0309-(non-)reasoning, -multi-agent-0309
     "grok-4": 256000,           # grok-4, grok-4-0709
@@ -159,6 +160,17 @@ DEFAULT_CONTEXT_LENGTHS = {
     "kimi": 262144,
     # Nemotron — NVIDIA's open-weights series (128K context across all sizes)
     "nemotron": 131072,
+    # Kimi
+    "kimi": 262144,
+    # Kimi / Moonshot
+    "k2p5": 262144,             # Kimi K2.5 - OpenRouter: 256K context
+    "kimi-k2.5": 262144,         # Kimi K2.5 - OpenRouter: 256K context
+    "kimi-k2": 131072,           # Kimi K2 - 128K context
+    "kimi": 262144,              # Kimi fallback - 256K
+    # Ark / ByteDance / Doubao
+    "ark": 262144,             # ark-code-latest / doubao-seed-2.0-pro - 256K context (per your table)
+    "ark-code": 262144,        # Ark code models - 256K context
+    "ark-code-latest": 262144, # Ark code latest - 256K context (doubao-seed-2.0-pro)
     # Arcee
     "trinity": 262144,
     # OpenRouter
@@ -175,6 +187,8 @@ DEFAULT_CONTEXT_LENGTHS = {
     "mimo-v2-omni": 256000,
     "mimo-v2-flash": 256000,
     "zai-org/GLM-5": 202752,
+    "glm-5.1": 202752,       # GLM-5.1 - OpenRouter: ~200K context
+    "glm-5": 202752,         # GLM-5 - ~200K context
 }
 
 _CONTEXT_LENGTH_KEYS = (
