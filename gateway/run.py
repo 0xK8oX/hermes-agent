@@ -1074,6 +1074,23 @@ class GatewayRunner:
                 (resolved_session_key or "")[:30], model,
                 list(self._session_model_overrides.keys())[:5] if self._session_model_overrides else "[]",
             )
+            # Extension hook: channel binding model override as fallback
+            from gateway.extensions import fire_hooks_first
+            _ch_override = fire_hooks_first("get_model_override", resolved_session_key) if resolved_session_key else None
+            if _ch_override:
+                _ch_model = _ch_override.get("model", model)
+                override_runtime = {
+                    "provider": _ch_override.get("provider"),
+                    "api_key": _ch_override.get("api_key"),
+                    "base_url": _ch_override.get("base_url"),
+                    "api_mode": _ch_override.get("api_mode"),
+                }
+                if _ch_model != model or override_runtime.get("api_key"):
+                    logger.info(
+                        "Channel binding model override: session=%s model=%s provider=%s",
+                        (resolved_session_key or "")[:30], _ch_model, override_runtime.get("provider"),
+                    )
+                    return _ch_model, override_runtime
 
         runtime_kwargs = _resolve_runtime_agent_kwargs()
         if override and resolved_session_key:
@@ -2251,6 +2268,9 @@ class GatewayRunner:
                     )
 
                 for key, entry in _expired_entries:
+                    # Extension hook: cleanup extension state for expired sessions
+                    from gateway.extensions import fire_hooks
+                    fire_hooks("on_session_cleanup", key)
                     try:
                         await self._async_flush_memories(entry.session_id, key)
                         # Shut down memory provider and close tool resources
@@ -3496,6 +3516,9 @@ class GatewayRunner:
         if canonical == "personality":
             return await self._handle_personality_command(event)
 
+        if canonical == "bind":
+            return await self._handle_bind_command(event)
+
         if canonical == "plan":
             try:
                 from agent.skill_commands import build_plan_path, build_skill_invocation_message
@@ -4047,6 +4070,46 @@ class GatewayRunner:
                     )
             except Exception as e:
                 logger.warning("[Gateway] Failed to auto-load skill(s) %s: %s", _skill_names, e)
+
+        # Extension-provided skills override (from channel_personality_bindings)
+        # Takes effect if adapter did not provide auto_skill.
+        if _is_new_session and not _auto:
+            try:
+                from gateway.extensions import fire_hooks_first
+                _ext_skills = fire_hooks_first("get_skills_override", session_key)
+                if _ext_skills:
+                    _skill_names = _ext_skills if isinstance(_ext_skills, list) else [_ext_skills]
+                    from agent.skill_commands import _load_skill_payload, _build_skill_message
+                    _combined_parts: list[str] = []
+                    _loaded_names: list[str] = []
+                    for _sname in _skill_names:
+                        _loaded = _load_skill_payload(_sname, task_id=_quick_key)
+                        if _loaded:
+                            _loaded_skill, _skill_dir, _display_name = _loaded
+                            _note = (
+                                f'[SYSTEM: The "{_display_name}" skill is auto-loaded. '
+                                f"Follow its instructions for this session.]"
+                            )
+                            _part = _build_skill_message(_loaded_skill, _skill_dir, _note)
+                            if _part:
+                                _combined_parts.append(_part)
+                                _loaded_names.append(_sname)
+                        else:
+                            logger.warning("[Gateway] Extension skill '%s' not found", _sname)
+                    if _combined_parts:
+                        _combined_parts.append(event.text)
+                        event.text = "\n\n".join(_combined_parts)
+                        logger.info(
+                            "[Gateway] Extension auto-loaded skill(s) %s for session %s",
+                            _loaded_names, session_key,
+                        )
+            except Exception as e:
+                logger.warning("[Gateway] Failed to load extension skills: %s", e)
+
+        # Extension hook: extensions process new session (soul loading, model override, etc.)
+        if _is_new_session:
+            from gateway.extensions import fire_hooks
+            fire_hooks("on_new_session", session_key, event)
 
         # Load conversation history from transcript
         history = self.session_store.load_transcript(session_entry.session_id)
@@ -4872,6 +4935,10 @@ class GatewayRunner:
         # Clear any session-scoped model override so the next agent picks up
         # the configured default instead of the previously switched model.
         self._session_model_overrides.pop(session_key, None)
+
+        # Extension hook: restore extension state after /reset
+        from gateway.extensions import fire_hooks
+        fire_hooks("on_session_reset", session_key)
 
         # Fire plugin on_session_finalize hook (session boundary)
         try:
@@ -5773,6 +5840,68 @@ class GatewayRunner:
 
         available = "`none`, " + ", ".join(f"`{n}`" for n in personalities)
         return f"Unknown personality: `{args}`\n\nAvailable: {available}"
+
+    async def _handle_bind_command(self, event: MessageEvent) -> str:
+        """Handle /bind command — dynamically switch soul for current channel.
+
+        Supports:
+          /bind              — show current binding
+          /bind <soul_name>  — switch soul for this session
+          /bind --clear      — remove dynamic binding
+        """
+        from gateway.extensions.channel_binding import (
+            _session_souls, _session_bindings, _session_soul_names,
+            _session_model_overrides, _apply_binding, _load_soul_content,
+        )
+        from gateway.extensions import fire_hooks_first
+
+        args = event.get_command_args().strip()
+        source = event.source
+        session_entry = self.session_store.get_or_create_session(source)
+        session_key = session_entry.session_id or source
+
+        # /bind --clear
+        if args == "--clear":
+            _session_souls.pop(session_key, None)
+            _session_bindings.pop(session_key, None)
+            _session_soul_names.pop(session_key, None)
+            _session_model_overrides.pop(session_key, None)
+            return "🔓 Soul binding cleared — using default personality.\n_(takes effect on next message)_"
+
+        # /bind <soul_name>
+        if args:
+            soul_name = args.lower().strip()
+            content = _load_soul_content(soul_name)
+            if not content:
+                # List available souls as hint
+                try:
+                    from hermes_constants import get_hermes_home
+                    souls_dir = get_hermes_home() / "souls"
+                except ImportError:
+                    from pathlib import Path
+                    souls_dir = Path.home() / ".hermes" / "souls"
+                available = []
+                if souls_dir.exists():
+                    available = sorted(p.stem for p in souls_dir.glob("*.md"))
+                soul_list = ", ".join(f"`{s}`" for s in available) if available else "(none found)"
+                return f"⚠️ Soul `{soul_name}` not found in ~/.hermes/souls/\n\nAvailable: {soul_list}"
+
+            # Apply the binding (soul only, no model override for dynamic bind)
+            binding = {"soul": soul_name}
+            _apply_binding(session_key, binding)
+            return f"🎭 Soul set to **{soul_name}** for this session.\n_(takes effect on next message)_"
+
+        # /bind (no args) — show current binding
+        current_soul = _session_soul_names.get(session_key)
+        current_model = fire_hooks_first("get_model_override", session_key)
+        if not current_soul:
+            return "No soul binding active for this session.\n\nUsage: `/bind <soul_name>` or `/bind --clear`"
+
+        lines = [f"🎭 **Current binding:** `{current_soul}`"]
+        if current_model:
+            lines.append(f"🤖 Model: `{current_model.get('model', 'default')}`")
+        lines.append("\nUsage: `/bind <soul_name>` to switch, `/bind --clear` to remove")
+        return "\n".join(lines)
     
     async def _handle_retry_command(self, event: MessageEvent) -> str:
         """Handle /retry command - re-send the last user message."""
@@ -6413,6 +6542,14 @@ class GatewayRunner:
             self._service_tier = self._load_service_tier()
             turn_route = self._resolve_turn_agent_config(prompt, model, runtime_kwargs)
 
+            # Resolve memory scope from channel binding extension
+            _memory_scope = None
+            try:
+                from gateway.extensions import fire_hooks_first
+                _memory_scope = fire_hooks_first("get_memory_scope", task_id)
+            except Exception:
+                pass
+
             def run_sync():
                 agent = AIAgent(
                     model=turn_route["model"],
@@ -6435,6 +6572,7 @@ class GatewayRunner:
                     user_id=source.user_id,
                     session_db=self._session_db,
                     fallback_model=self._fallback_model,
+                    memory_scope=_memory_scope,
                 )
                 try:
                     return agent.run_conversation(
@@ -9473,7 +9611,14 @@ class GatewayRunner:
             event_channel_prompt = (channel_prompt or "").strip()
             if event_channel_prompt:
                 combined_ephemeral = (combined_ephemeral + "\n\n" + event_channel_prompt).strip()
-            if self._ephemeral_system_prompt:
+
+            # Extension hook: channel-bound soul replaces global ephemeral entirely
+            from gateway.extensions import fire_hooks_first
+            _ch_ephemeral = fire_hooks_first("get_ephemeral", session_key)
+
+            if _ch_ephemeral:
+                combined_ephemeral = (combined_ephemeral + "\n\n" + _ch_ephemeral).strip()
+            elif self._ephemeral_system_prompt:
                 combined_ephemeral = (combined_ephemeral + "\n\n" + self._ephemeral_system_prompt).strip()
 
             # Re-read .env and config for fresh credentials (gateway is long-lived,
@@ -9596,6 +9741,14 @@ class GatewayRunner:
 
             turn_route = self._resolve_turn_agent_config(message, model, runtime_kwargs)
 
+            # Resolve memory scope from channel binding extension
+            _persist_mem_scope = None
+            try:
+                from gateway.extensions import fire_hooks_first
+                _persist_mem_scope = fire_hooks_first("get_memory_scope", session_id)
+            except Exception:
+                pass
+
             # Check agent cache — reuse the AIAgent from the previous message
             # in this session to preserve the frozen system prompt and tool
             # schemas for prompt cache hits.
@@ -9654,6 +9807,7 @@ class GatewayRunner:
                     gateway_session_key=session_key,
                     session_db=self._session_db,
                     fallback_model=self._fallback_model,
+                    memory_scope=_persist_mem_scope,
                 )
                 if _cache_lock and _cache is not None:
                     with _cache_lock:

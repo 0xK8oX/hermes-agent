@@ -762,6 +762,7 @@ class AIAgent:
         checkpoint_max_snapshots: int = 50,
         pass_session_id: bool = False,
         persist_session: bool = True,
+        memory_scope: str = None,
     ):
         """
         Initialize the AI Agent.
@@ -1422,9 +1423,22 @@ class AIAgent:
                 self._memory_flush_min_turns = int(mem_config.get("flush_min_turns", 6))
                 if self._memory_enabled or self._user_profile_enabled:
                     from tools.memory_tool import MemoryStore
+
+                    # Resolve scoped memory directories if memory_scope is set
+                    _memory_dirs = None
+                    if memory_scope:
+                        try:
+                            from gateway.extensions.channel_binding import resolve_memory_dirs
+                            _resolved = resolve_memory_dirs(memory_scope)
+                            if _resolved:
+                                _memory_dirs = [str(p) for p in _resolved]
+                        except Exception:
+                            pass  # Fall back to unscoped
+
                     self._memory_store = MemoryStore(
                         memory_char_limit=mem_config.get("memory_char_limit", 2200),
                         user_char_limit=mem_config.get("user_char_limit", 1375),
+                        memory_dirs=_memory_dirs,
                     )
                     self._memory_store.load_from_disk()
             except Exception:

@@ -113,25 +113,52 @@ class MemoryStore:
         Tool responses always reflect this live state.
     """
 
-    def __init__(self, memory_char_limit: int = 2200, user_char_limit: int = 1375):
+    def __init__(self, memory_char_limit: int = 2200, user_char_limit: int = 1375,
+                 memory_dirs: list = None):
         self.memory_entries: List[str] = []
         self.user_entries: List[str] = []
         self.memory_char_limit = memory_char_limit
         self.user_char_limit = user_char_limit
+        # Scoped memory directories: [global_dir, ..., scope_dir]
+        # Reads merge from all dirs; writes go to the LAST dir (the scope).
+        # If None/empty, falls back to get_memory_dir() (backward compatible).
+        self._memory_dirs: Optional[List[Path]] = (
+            [Path(d) for d in memory_dirs] if memory_dirs else None
+        )
         # Frozen snapshot for system prompt -- set once at load_from_disk()
         self._system_prompt_snapshot: Dict[str, str] = {"memory": "", "user": ""}
 
+    @property
+    def _write_dir(self) -> Path:
+        """Directory for writes — last in the scope list, or default."""
+        if self._memory_dirs:
+            return self._memory_dirs[-1]
+        return get_memory_dir()
+
     def load_from_disk(self):
-        """Load entries from MEMORY.md and USER.md, capture system prompt snapshot."""
-        mem_dir = get_memory_dir()
-        mem_dir.mkdir(parents=True, exist_ok=True)
+        """Load entries from MEMORY.md and USER.md, capture system prompt snapshot.
 
-        self.memory_entries = self._read_file(mem_dir / "MEMORY.md")
-        self.user_entries = self._read_file(mem_dir / "USER.md")
-
-        # Deduplicate entries (preserves order, keeps first occurrence)
-        self.memory_entries = list(dict.fromkeys(self.memory_entries))
-        self.user_entries = list(dict.fromkeys(self.user_entries))
+        If scoped directories are set, reads and merges entries from ALL dirs.
+        Global entries come first, scope-specific entries after.
+        """
+        if self._memory_dirs:
+            # Scoped mode: merge from all directories
+            merged_memory: List[str] = []
+            merged_user: List[str] = []
+            for d in self._memory_dirs:
+                d.mkdir(parents=True, exist_ok=True)
+                merged_memory.extend(self._read_file(d / "MEMORY.md"))
+                merged_user.extend(self._read_file(d / "USER.md"))
+            self.memory_entries = list(dict.fromkeys(merged_memory))
+            self.user_entries = list(dict.fromkeys(merged_user))
+        else:
+            # Default (backward compatible)
+            mem_dir = get_memory_dir()
+            mem_dir.mkdir(parents=True, exist_ok=True)
+            self.memory_entries = self._read_file(mem_dir / "MEMORY.md")
+            self.user_entries = self._read_file(mem_dir / "USER.md")
+            self.memory_entries = list(dict.fromkeys(self.memory_entries))
+            self.user_entries = list(dict.fromkeys(self.user_entries))
 
         # Capture frozen snapshot for system prompt injection
         self._system_prompt_snapshot = {
@@ -183,19 +210,25 @@ class MemoryStore:
             return mem_dir / "USER.md"
         return mem_dir / "MEMORY.md"
 
+    def _scoped_path_for(self, target: str) -> Path:
+        """Path for read/write in current scope. Falls back to _path_for."""
+        if target == "user":
+            return self._write_dir / "USER.md"
+        return self._write_dir / "MEMORY.md"
+
     def _reload_target(self, target: str):
         """Re-read entries from disk into in-memory state.
 
         Called under file lock to get the latest state before mutating.
         """
-        fresh = self._read_file(self._path_for(target))
+        fresh = self._read_file(self._scoped_path_for(target))
         fresh = list(dict.fromkeys(fresh))  # deduplicate
         self._set_entries(target, fresh)
 
     def save_to_disk(self, target: str):
         """Persist entries to the appropriate file. Called after every mutation."""
-        get_memory_dir().mkdir(parents=True, exist_ok=True)
-        self._write_file(self._path_for(target), self._entries_for(target))
+        self._write_dir.mkdir(parents=True, exist_ok=True)
+        self._write_file(self._scoped_path_for(target), self._entries_for(target))
 
     def _entries_for(self, target: str) -> List[str]:
         if target == "user":

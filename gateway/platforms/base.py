@@ -730,7 +730,12 @@ class MessageEvent:
     # Applied at API call time and never persisted to transcript history.
     channel_prompt: Optional[str] = None
     
-    # Internal flag — set for synthetic events (e.g. background process
+    # Platform-specific metadata carried through the gateway pipeline.
+    # Adapters populate this; extensions/hooks read from it.  Generic key-value
+    # bag avoids hard-coding per-platform fields on this dataclass.
+    extra: dict = field(default_factory=dict)
+    
+    # Internal flag — set for synthetic events (e.g., background process
     # completion notifications) that must bypass user authorization checks.
     internal: bool = False
 

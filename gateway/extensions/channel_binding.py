@@ -1,0 +1,582 @@
+"""
+Channel Personality Binding Extension
+======================================
+
+Unified binding: soul + skills + model + memory_scope per channel.
+
+Self-contained: owns its own state, loads soul files, manages per-session
+overrides, restores after /reset, and provides scoped memory isolation.
+
+Config format (in config.yaml, under {platform}.extra):
+
+    channel_personality_bindings:
+      - id: "123456"                            # channel/thread ID
+        soul: "dev"                              # ~/.hermes/souls/dev.md
+        skills: ["systematic-debugging", "github-pr-workflow"]  # auto-loaded
+        model: "anthropic/claude-sonnet-4"       # optional model override
+        provider: "openai"                       # optional provider
+        base_url: "https://..."                  # optional base URL
+        api_key: "${API_KEY}"                    # optional, env-var expanded
+        memory_scope: "dev"                      # scoped memory dir
+
+Memory architecture:
+    ~/.hermes/memories/
+    ├── _global/     ← shared across all channels
+    ├── dev/         ← only #dev channel reads/writes
+    ├── pm/          ← only #pm channel reads/writes
+    └── ...
+
+    memory_scope: "*"  → God mode, reads ALL scopes
+    memory_scope omitted → default (unscoped, backward compatible)
+
+Resolution:
+    1. ``event.extra["channel_binding"]`` — set by adapter (Discord)
+    2. Session-key → config match — works for any platform, zero adapter changes
+
+This module registers itself via ``register_hook()`` on import.
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+from gateway.extensions import register_hook
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Per-session state (module-level, keyed by session_key)
+# ---------------------------------------------------------------------------
+
+# soul content per session: {session_key: str}
+_session_souls: Dict[str, str] = {}
+
+# model overrides per session: {session_key: {model, provider, api_key, base_url}}
+_session_model_overrides: Dict[str, Dict[str, Optional[str]]] = {}
+
+# soul name per session (for /reset re-load): {session_key: str}
+_session_soul_names: Dict[str, str] = {}
+
+# binding config per session (for /reset restore): {session_key: dict}
+_session_bindings: Dict[str, dict] = {}
+
+# skills override per session: {session_key: [skill_names]}
+_session_skills: Dict[str, List[str]] = {}
+
+# memory scope per session: {session_key: str}
+_session_memory_scopes: Dict[str, str] = {}
+
+# Config cache for cross-platform binding resolution (invalidated on /reset)
+_CONFIG_BINDINGS_CACHE: Optional[Dict[str, list]] = None
+
+
+# ---------------------------------------------------------------------------
+# Soul loading
+# ---------------------------------------------------------------------------
+
+def _load_soul_content(soul_name: str) -> Optional[str]:
+    """Load soul content from ~/.hermes/souls/<soul_name>.md."""
+    if "/" in soul_name or "\\" in soul_name or ".." in soul_name:
+        logger.warning("[ChannelBinding] Invalid soul name (path traversal): %s", soul_name)
+        return None
+
+    try:
+        from hermes_constants import get_hermes_home
+        soul_path = get_hermes_home() / "souls" / f"{soul_name}.md"
+    except ImportError:
+        soul_path = Path.home() / ".hermes" / "souls" / f"{soul_name}.md"
+
+    if not soul_path.exists():
+        logger.warning("[ChannelBinding] Soul file not found: %s", soul_path)
+        return None
+
+    try:
+        content = soul_path.read_text(encoding="utf-8").strip()
+        return content if content else None
+    except Exception as e:
+        logger.warning("[ChannelBinding] Failed to load soul '%s': %s", soul_name, e)
+        return None
+
+
+def _expand_api_key(raw: Optional[str]) -> Optional[str]:
+    """Expand ${ENV_VAR} references in API key strings."""
+    if not raw or not isinstance(raw, str):
+        return None
+    return os.path.expandvars(raw)
+
+
+# ---------------------------------------------------------------------------
+# Hook handlers
+# ---------------------------------------------------------------------------
+
+def _on_new_session(session_key: str, event: Any) -> None:
+    """Apply channel binding overrides for a new session.
+
+    Resolution order:
+    1. ``event.extra["channel_binding"]`` — set by platform adapter (Discord)
+    2. Session-key → config match — works for any platform without adapter changes
+    """
+    binding = None
+
+    # Path 1: adapter-provided binding (Discord sets event.extra)
+    if hasattr(event, "extra") and isinstance(getattr(event, "extra", None), dict):
+        binding = event.extra.get("channel_binding")
+
+    # Path 2: resolve from session_key + config (works for any platform)
+    if not binding:
+        binding = _resolve_binding_from_session_key(session_key)
+
+    if not binding or not isinstance(binding, dict):
+        return
+
+    _apply_binding(session_key, binding)
+
+
+def _apply_binding(session_key: str, binding: dict) -> None:
+    """Store soul + skills + model + memory_scope from a resolved binding dict."""
+    soul_name = binding.get("soul")
+    model = binding.get("model")
+    skills = binding.get("skills")
+    memory_scope = binding.get("memory_scope")
+
+    # Store the raw binding for /reset restore
+    _session_bindings[session_key] = binding
+
+    # Load soul content
+    if soul_name and isinstance(soul_name, str):
+        content = _load_soul_content(soul_name)
+        if content:
+            _session_souls[session_key] = content
+            _session_soul_names[session_key] = soul_name
+            logger.info(
+                "[ChannelBinding] Soul '%s' → session %s",
+                soul_name, session_key[:30],
+            )
+
+    # Store skills override
+    if skills:
+        if isinstance(skills, str):
+            skills = [skills]
+        if isinstance(skills, list) and skills:
+            _session_skills[session_key] = list(dict.fromkeys(skills))
+            logger.info(
+                "[ChannelBinding] Skills %s → session %s",
+                _session_skills[session_key], session_key[:30],
+            )
+
+    # Store model override
+    if model:
+        _session_model_overrides[session_key] = {
+            "model": model,
+            "provider": binding.get("provider"),
+            "api_key": _expand_api_key(binding.get("api_key")),
+            "base_url": binding.get("base_url"),
+            "api_mode": None,
+        }
+        logger.info(
+            "[ChannelBinding] Model '%s' (provider=%s) → session %s",
+            model, binding.get("provider"), session_key[:30],
+        )
+
+    # Store memory scope
+    if memory_scope and isinstance(memory_scope, str):
+        _session_memory_scopes[session_key] = memory_scope
+        logger.info(
+            "[ChannelBinding] Memory scope '%s' → session %s",
+            memory_scope, session_key[:30],
+        )
+
+
+def _resolve_binding_from_session_key(session_key: str) -> Optional[dict]:
+    """Resolve a channel binding from session_key + config.
+
+    Parses ``agent:main:{platform}:{chat_type}:{chat_id}`` and matches
+    against all configured platform bindings.
+    """
+    if not session_key:
+        return None
+
+    parts = session_key.split(":")
+    if len(parts) < 5 or parts[0] != "agent":
+        return None
+
+    platform = parts[2]
+    chat_id = parts[4] if len(parts) > 4 else None
+    if not chat_id:
+        return None
+
+    all_bindings = _get_all_platform_bindings()
+    platform_bindings = all_bindings.get(platform, [])
+
+    for entry in platform_bindings:
+        if not isinstance(entry, dict):
+            continue
+        entry_id = str(entry.get("id", ""))
+        if entry_id == chat_id:
+            return entry
+
+    return None
+
+
+def _get_all_platform_bindings() -> Dict[str, list]:
+    """Load channel_personality_bindings for all platforms from config.yaml.
+
+    Returns {platform_name: [binding_dicts]}.
+    Result is cached on first call.
+    """
+    global _CONFIG_BINDINGS_CACHE
+
+    if _CONFIG_BINDINGS_CACHE is not None:
+        return _CONFIG_BINDINGS_CACHE
+
+    import yaml
+
+    try:
+        from hermes_constants import get_hermes_home
+        config_path = get_hermes_home() / "config.yaml"
+    except ImportError:
+        config_path = Path.home() / ".hermes" / "config.yaml"
+
+    result: Dict[str, list] = {}
+
+    if not config_path.exists():
+        _CONFIG_BINDINGS_CACHE = result
+        return result
+
+    try:
+        raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    except Exception:
+        _CONFIG_BINDINGS_CACHE = result
+        return result
+
+    if not isinstance(raw, dict):
+        _CONFIG_BINDINGS_CACHE = result
+        return result
+
+    # Scan top-level platform keys (discord, telegram, whatsapp, etc.)
+    for platform_name, platform_cfg in raw.items():
+        if not isinstance(platform_cfg, dict):
+            continue
+        extra = platform_cfg.get("extra", {})
+        if not isinstance(extra, dict):
+            continue
+        bindings = extra.get("channel_personality_bindings", [])
+        if isinstance(bindings, list) and bindings:
+            result[platform_name] = bindings
+
+    # Also scan platforms.* (alternative layout)
+    platforms = raw.get("platforms", {})
+    if isinstance(platforms, dict):
+        for platform_name, platform_cfg in platforms.items():
+            if platform_name in result:
+                continue
+            if not isinstance(platform_cfg, dict):
+                continue
+            extra = platform_cfg.get("extra", {})
+            if not isinstance(extra, dict):
+                continue
+            bindings = extra.get("channel_personality_bindings", [])
+            if isinstance(bindings, list) and bindings:
+                result[platform_name] = bindings
+
+    _CONFIG_BINDINGS_CACHE = result
+    logger.debug("[ChannelBinding] Loaded bindings for platforms: %s", list(result.keys()))
+    return result
+
+
+def _on_session_reset(session_key: str) -> None:
+    """Re-apply channel binding after /reset.
+
+    Re-loads the soul content from disk (in case the file changed),
+    restores overrides, and invalidates config cache for hot-reload.
+    """
+    global _CONFIG_BINDINGS_CACHE
+    _CONFIG_BINDINGS_CACHE = None
+
+    binding = _session_bindings.get(session_key)
+    if not binding:
+        return
+
+    # Re-load soul from disk
+    soul_name = binding.get("soul")
+    if soul_name and isinstance(soul_name, str):
+        content = _load_soul_content(soul_name)
+        if content:
+            _session_souls[session_key] = content
+            logger.info(
+                "[ChannelBinding] /reset: restored soul '%s' for %s",
+                soul_name, session_key[:30],
+            )
+
+    model_override = _session_model_overrides.get(session_key)
+    if model_override:
+        logger.info(
+            "[ChannelBinding] /reset: keeping model '%s' for %s",
+            model_override.get("model"), session_key[:30],
+        )
+
+
+def _on_session_cleanup(session_key: str) -> None:
+    """Remove all per-session state for an expired session."""
+    _session_souls.pop(session_key, None)
+    _session_model_overrides.pop(session_key, None)
+    _session_soul_names.pop(session_key, None)
+    _session_bindings.pop(session_key, None)
+    _session_skills.pop(session_key, None)
+    _session_memory_scopes.pop(session_key, None)
+
+
+def _get_model_override(session_key: str) -> Optional[Dict[str, Optional[str]]]:
+    """Return the channel binding model override for a session, or None."""
+    return _session_model_overrides.get(session_key)
+
+
+def _get_ephemeral(session_key: str) -> Optional[str]:
+    """Return the per-session soul override content, or None."""
+    return _session_souls.get(session_key)
+
+
+def _get_skills_override(session_key: str) -> Optional[List[str]]:
+    """Return the per-session skills override, or None.
+
+    Used by gateway/run.py to inject skills into new sessions.
+    An empty list means "all skills" (God mode).
+    """
+    return _session_skills.get(session_key)
+
+
+def _get_memory_scope(session_key: str) -> Optional[str]:
+    """Return the per-session memory scope, or None.
+
+    Values:
+      - None: default (unscoped, backward compatible)
+      - "dev", "pm", etc.: read _global/ + {scope}/
+      - "*": God mode, read _global/ + ALL subdirectories
+    """
+    return _session_memory_scopes.get(session_key)
+
+
+# ---------------------------------------------------------------------------
+# Scoped memory resolution (used by MemoryStore via run_agent.py)
+# ---------------------------------------------------------------------------
+
+def resolve_memory_dirs(scope: Optional[str]) -> List[Path]:
+    """Resolve memory directories for a given scope.
+
+    Returns a list of directories to read, in priority order:
+      - ``_global/`` always first (shared context)
+      - Scoped directory (if scope is a named scope like "dev")
+      - ALL scope directories (if scope is "*")
+
+    This function is the public API used by run_agent.py to pass
+    memory directories to MemoryStore.
+    """
+    try:
+        from hermes_constants import get_hermes_home
+        base = get_hermes_home() / "memories"
+    except ImportError:
+        base = Path.home() / ".hermes" / "memories"
+
+    dirs: List[Path] = []
+
+    # _global/ is always included
+    global_dir = base / "_global"
+    if global_dir.exists():
+        dirs.append(global_dir)
+
+    if not scope:
+        # No scope — read from base dir (backward compatible)
+        return dirs if dirs else [base]
+
+    if scope == "*":
+        # God mode — read all subdirectories except _global (already added)
+        if base.exists():
+            for child in sorted(base.iterdir()):
+                if child.is_dir() and child.name != "_global" and not child.name.startswith("."):
+                    dirs.append(child)
+        return dirs
+
+    # Named scope — read specific subdirectory
+    scoped_dir = base / scope
+    if scoped_dir.exists():
+        dirs.append(scoped_dir)
+    else:
+        # Auto-create on first access
+        scoped_dir.mkdir(parents=True, exist_ok=True)
+        dirs.append(scoped_dir)
+
+    return dirs
+
+
+# ---------------------------------------------------------------------------
+# Startup validation
+# ---------------------------------------------------------------------------
+
+def _validate_bindings() -> None:
+    """Check that all configured bindings are valid at startup.
+
+    Validates:
+    - Soul files exist
+    - Model names are non-empty strings
+    - API key env var references are set
+    - Skills referenced exist in ~/.hermes/skills/
+    - Memory scope directories are valid paths
+    """
+    import yaml
+
+    try:
+        from hermes_constants import get_hermes_home
+        config_path = get_hermes_home() / "config.yaml"
+        souls_dir = get_hermes_home() / "souls"
+        skills_dir = get_hermes_home() / "skills"
+    except ImportError:
+        config_path = Path.home() / ".hermes" / "config.yaml"
+        souls_dir = Path.home() / ".hermes" / "souls"
+        skills_dir = Path.home() / ".hermes" / "skills"
+
+    if not config_path.exists():
+        return
+
+    try:
+        raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    except Exception as e:
+        logger.warning("[ChannelBinding] Startup: failed to read config.yaml: %s", e)
+        return
+
+    if not isinstance(raw, dict):
+        return
+
+    # Collect all bindings across all platforms
+    all_bindings: list = []
+    for _platform_name, platform_cfg in raw.items():
+        if not isinstance(platform_cfg, dict):
+            continue
+        extra = platform_cfg.get("extra", {})
+        if not isinstance(extra, dict):
+            continue
+        bindings = extra.get("channel_personality_bindings", [])
+        if isinstance(bindings, list):
+            all_bindings.extend(bindings)
+
+    # Also check platforms.* layout
+    platforms = raw.get("platforms", {})
+    if isinstance(platforms, dict):
+        for _platform_name, platform_cfg in platforms.items():
+            if not isinstance(platform_cfg, dict):
+                continue
+            extra = platform_cfg.get("extra", {})
+            if not isinstance(extra, dict):
+                continue
+            bindings = extra.get("channel_personality_bindings", [])
+            if isinstance(bindings, list):
+                all_bindings.extend(bindings)
+
+    if not all_bindings:
+        return
+
+    errors = 0
+    validated_skills: set = set()
+
+    for i, entry in enumerate(all_bindings):
+        if not isinstance(entry, dict):
+            continue
+        chan_id = entry.get("id", f"#{i}")
+        soul_name = entry.get("soul")
+        model = entry.get("model")
+        skills = entry.get("skills")
+        memory_scope = entry.get("memory_scope")
+
+        # Validate soul file
+        if soul_name:
+            soul_path = souls_dir / f"{soul_name}.md"
+            if not soul_path.exists():
+                logger.error(
+                    "[ChannelBinding] Startup FAIL: channel %s — soul '%s' not found at %s",
+                    chan_id, soul_name, soul_path,
+                )
+                errors += 1
+            else:
+                logger.info("[ChannelBinding] Startup OK: channel %s — soul '%s'", chan_id, soul_name)
+        else:
+            logger.warning("[ChannelBinding] Startup WARN: channel %s — no soul configured", chan_id)
+
+        # Validate model name
+        if model is not None and (not isinstance(model, str) or not model.strip()):
+            logger.error(
+                "[ChannelBinding] Startup FAIL: channel %s — invalid model '%s'",
+                chan_id, model,
+            )
+            errors += 1
+
+        # Validate skills exist
+        if skills:
+            skill_list = [skills] if isinstance(skills, str) else skills
+            for sname in skill_list:
+                if sname not in validated_skills:
+                    validated_skills.add(sname)
+                    skill_path = skills_dir / sname / "SKILL.md"
+                    if not skill_path.exists():
+                        # Also try flat file
+                        flat_path = skills_dir / f"{sname}.md"
+                        if not flat_path.exists():
+                            logger.warning(
+                                "[ChannelBinding] Startup WARN: channel %s — skill '%s' not found",
+                                chan_id, sname,
+                            )
+
+        # Validate memory scope name (basic path safety)
+        if memory_scope:
+            if not isinstance(memory_scope, str):
+                logger.error(
+                    "[ChannelBinding] Startup FAIL: channel %s — memory_scope must be a string",
+                    chan_id,
+                )
+                errors += 1
+            elif "/" in memory_scope or "\\" in memory_scope or ".." in memory_scope:
+                logger.error(
+                    "[ChannelBinding] Startup FAIL: channel %s — invalid memory_scope '%s'",
+                    chan_id, memory_scope,
+                )
+                errors += 1
+            else:
+                logger.info(
+                    "[ChannelBinding] Startup OK: channel %s — memory_scope '%s'",
+                    chan_id, memory_scope,
+                )
+
+        # Validate api_key env var reference
+        api_key_raw = entry.get("api_key")
+        if api_key_raw and isinstance(api_key_raw, str) and api_key_raw.startswith("${"):
+            import re
+            m = re.match(r"^\$\{(\w+)\}$", api_key_raw)
+            if m:
+                var_name = m.group(1)
+                if not os.environ.get(var_name):
+                    logger.warning(
+                        "[ChannelBinding] Startup WARN: channel %s — env var '%s' not set",
+                        chan_id, var_name,
+                    )
+
+    if errors:
+        logger.error("[ChannelBinding] Startup: %d error(s) found", errors)
+    else:
+        logger.info("[ChannelBinding] Startup: all %d binding(s) validated OK", len(all_bindings))
+
+
+# ---------------------------------------------------------------------------
+# Register all hooks
+# ---------------------------------------------------------------------------
+
+register_hook("on_new_session", _on_new_session)
+register_hook("on_session_reset", _on_session_reset)
+register_hook("on_session_cleanup", _on_session_cleanup)
+register_hook("get_model_override", _get_model_override)
+register_hook("get_ephemeral", _get_ephemeral)
+register_hook("get_skills_override", _get_skills_override)
+register_hook("get_memory_scope", _get_memory_scope)
+
+# Run startup validation
+_validate_bindings()

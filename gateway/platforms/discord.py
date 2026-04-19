@@ -2359,12 +2359,18 @@ class DiscordAdapter(BasePlatformAdapter):
         msg_type = MessageType.COMMAND if text.startswith("/") else MessageType.TEXT
         channel_id = str(interaction.channel_id)
         parent_id = str(getattr(getattr(interaction, "channel", None), "parent_id", "") or "")
+        _personality = self._resolve_channel_personality_binding(channel_id, parent_id or None)
+        _extra = {}
+        if _personality:
+            _extra["channel_binding"] = _personality
+
         return MessageEvent(
             text=text,
             message_type=msg_type,
             source=source,
             raw_message=interaction,
             channel_prompt=self._resolve_channel_prompt(channel_id, parent_id or None),
+            extra=_extra,
         )
 
     # ------------------------------------------------------------------
@@ -2439,6 +2445,10 @@ class DiscordAdapter(BasePlatformAdapter):
         _parent_id = str(getattr(_parent_channel, "id", "") or "")
         _skills = self._resolve_channel_skills(thread_id, _parent_id or None)
         _channel_prompt = self._resolve_channel_prompt(thread_id, _parent_id or None)
+        _personality = self._resolve_channel_personality_binding(thread_id, _parent_id or None)
+        _extra = {}
+        if _personality:
+            _extra["channel_binding"] = _personality
         event = MessageEvent(
             text=text,
             message_type=MessageType.TEXT,
@@ -2446,6 +2456,7 @@ class DiscordAdapter(BasePlatformAdapter):
             raw_message=interaction,
             auto_skill=_skills,
             channel_prompt=_channel_prompt,
+            extra=_extra,
         )
         await self.handle_message(event)
 
@@ -2498,6 +2509,36 @@ class DiscordAdapter(BasePlatformAdapter):
         if isinstance(raw, str) and raw.strip():
             return {part.strip() for part in raw.split(",") if part.strip()}
         return set()
+
+    def _resolve_channel_personality_binding(self, channel_id: str, parent_id: str | None = None) -> dict | None:
+        """Look up personality (soul/model) binding for a Discord channel/forum thread.
+
+        Config format (in platform extra):
+            channel_personality_bindings:
+              - id: "123456"
+                soul: "dev"
+                model: "anthropic/claude-sonnet-4"  # optional
+                provider: "openai"                   # optional
+                base_url: "https://..."              # optional
+                api_key: "${API_KEY}"                # optional
+
+        Returns the binding dict (without the "id" key) or None.
+        Also checks parent_id so forum threads inherit the forum's bindings.
+        """
+        bindings = self.config.extra.get("channel_personality_bindings", [])
+        if not bindings:
+            return None
+        ids_to_check = {channel_id}
+        if parent_id:
+            ids_to_check.add(parent_id)
+        for entry in bindings:
+            entry_id = str(entry.get("id", ""))
+            if entry_id in ids_to_check:
+                # Return a copy without the "id" key
+                binding = {k: v for k, v in entry.items() if k != "id"}
+                if binding:
+                    return binding
+        return None
 
     def _thread_parent_channel(self, channel: Any) -> Any:
         """Return the parent text channel when invoked from a thread."""
@@ -3189,6 +3230,10 @@ class DiscordAdapter(BasePlatformAdapter):
         _chan_id = str(getattr(_chan, "id", ""))
         _skills = self._resolve_channel_skills(_chan_id, _parent_id or None)
         _channel_prompt = self._resolve_channel_prompt(_chan_id, _parent_id or None)
+        _personality = self._resolve_channel_personality_binding(_chan_id, _parent_id or None)
+        _extra = {}
+        if _personality:
+            _extra["channel_binding"] = _personality
 
         reply_to_id = None
         reply_to_text = None
@@ -3210,6 +3255,7 @@ class DiscordAdapter(BasePlatformAdapter):
             timestamp=message.created_at,
             auto_skill=_skills,
             channel_prompt=_channel_prompt,
+            extra=_extra,
         )
 
         # Track thread participation so the bot won't require @mention for
