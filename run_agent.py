@@ -760,6 +760,7 @@ class AIAgent:
         persist_session: bool = True,
         memory_scope: Optional[str] = None,
         soul_content: Optional[str] = None,
+        personality: Optional[str] = None,
     ):
         """
         Initialize the AI Agent.
@@ -1362,6 +1363,7 @@ class AIAgent:
         # SQLite session store (optional -- provided by CLI or gateway)
         self._session_db = session_db
         self._parent_session_id = parent_session_id
+        self._personality = personality  # soul name for session_search isolation
         self._last_flushed_db_idx = 0  # tracks DB-write cursor to prevent duplicate writes
         if self._session_db:
             try:
@@ -1376,6 +1378,7 @@ class AIAgent:
                     },
                     user_id=None,
                     parent_session_id=self._parent_session_id,
+                    personality=personality,
                 )
             except Exception as e:
                 # Transient SQLite lock contention (e.g. CLI and gateway writing
@@ -7610,6 +7613,7 @@ class AIAgent:
                 limit=function_args.get("limit", 3),
                 db=self._session_db,
                 current_session_id=self.session_id,
+                personality_filter=self._personality,
             )
         elif function_name == "memory":
             target = function_args.get("target", "memory")
@@ -8128,6 +8132,7 @@ class AIAgent:
                         limit=function_args.get("limit", 3),
                         db=self._session_db,
                         current_session_id=self.session_id,
+                        personality_filter=self._personality,
                     )
                 tool_duration = time.time() - tool_start_time
                 if self._should_emit_quiet_tool_messages():

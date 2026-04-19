@@ -321,6 +321,7 @@ def session_search(
     limit: int = 3,
     db=None,
     current_session_id: str = None,
+    personality_filter: str = None,
 ) -> str:
     """
     Search past sessions and return focused summaries of matching conversations.
@@ -359,6 +360,7 @@ def session_search(
             query=query,
             role_filter=role_list,
             exclude_sources=list(_HIDDEN_SESSION_SOURCES),
+            personality_filter=personality_filter,
             limit=50,  # Get more matches to find unique sessions
             offset=0,
         )

@@ -10154,6 +10154,15 @@ class GatewayRunner:
             from gateway.extensions import fire_hooks_first
             _ch_ephemeral = fire_hooks_first("get_ephemeral", session_key)
 
+            # Resolve personality (soul name) for session_search isolation
+            _ch_personality = None
+            try:
+                from gateway.extensions.channel_binding import _session_soul_names, _ensure_binding_loaded
+                _ensure_binding_loaded(session_key)
+                _ch_personality = _session_soul_names.get(session_key)
+            except Exception:
+                pass
+
             if _ch_ephemeral:
                 combined_ephemeral = (combined_ephemeral + "\n\n" + _ch_ephemeral).strip()
             elif self._ephemeral_system_prompt:
@@ -10355,6 +10364,7 @@ class GatewayRunner:
                     fallback_model=self._fallback_model,
                     memory_scope=_persist_mem_scope,
                     soul_content=_ch_ephemeral,
+                    personality=_ch_personality,
                 )
                 if _cache_lock and _cache is not None:
                     with _cache_lock:

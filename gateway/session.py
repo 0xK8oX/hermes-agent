@@ -717,7 +717,8 @@ class SessionStore:
     def get_or_create_session(
         self,
         source: SessionSource,
-        force_new: bool = False
+        force_new: bool = False,
+        personality: str = None,
     ) -> SessionEntry:
         """
         Get an existing session or create a new one.
@@ -798,6 +799,7 @@ class SessionStore:
                 "session_id": session_id,
                 "source": source.platform.value,
                 "user_id": source.user_id,
+                "personality": personality,
             }
 
         # SQLite operations outside the lock

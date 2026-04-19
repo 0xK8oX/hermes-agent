@@ -1120,7 +1120,7 @@ class TestSchemaInit:
     def test_schema_version(self, db):
         cursor = db._conn.execute("SELECT version FROM schema_version")
         version = cursor.fetchone()[0]
-        assert version == 6
+        assert version == 7
 
     def test_title_column_exists(self, db):
         """Verify the title column was created in the sessions table."""
@@ -1176,17 +1176,20 @@ class TestSchemaInit:
         conn.commit()
         conn.close()
 
-        # Open with SessionDB — should migrate to v6
+        # Open with SessionDB — should migrate to v7
         migrated_db = SessionDB(db_path=db_path)
 
         # Verify migration
         cursor = migrated_db._conn.execute("SELECT version FROM schema_version")
-        assert cursor.fetchone()[0] == 6
+        assert cursor.fetchone()[0] == 7
 
         # Verify title column exists and is NULL for existing sessions
         session = migrated_db.get_session("existing")
         assert session is not None
         assert session["title"] is None
+
+        # Verify personality column exists and is NULL for existing sessions
+        assert session.get("personality") is None
 
         # Verify we can set title on migrated session
         assert migrated_db.set_session_title("existing", "Migrated Title") is True
@@ -1732,3 +1735,68 @@ class TestConcurrentWriteSafety:
         assert "30" in src, (
             "SQLite timeout should be at least 30s to handle CLI/gateway lock contention"
         )
+
+
+class TestPersonalityIsolation:
+    """Tests for personality-based session isolation in search."""
+
+    def test_search_no_filter_returns_all(self, db):
+        """Without personality_filter, search returns all sessions."""
+        db.create_session("s1", "cli", personality="sam")
+        db.create_session("s2", "cli", personality="alpha")
+        db.append_message("s1", "user", "Sam was debugging the API")
+        db.append_message("s2", "user", "Alpha was reviewing specs")
+
+        results = db.search_messages("debugging")
+        assert len(results) >= 1
+        # Also check the other personality is findable without filter
+        results2 = db.search_messages("reviewing")
+        assert len(results2) >= 1
+
+    def test_search_with_personality_filter(self, db):
+        """With personality_filter, search only returns matching sessions."""
+        db.create_session("s1", "cli", personality="sam")
+        db.create_session("s2", "cli", personality="alpha")
+        db.append_message("s1", "user", "Sam was debugging the API")
+        db.append_message("s2", "user", "Alpha was reviewing specs")
+
+        # Sam sees only Sam's sessions
+        sam_results = db.search_messages("API", personality_filter="sam")
+        assert len(sam_results) == 1
+        assert "debugging" in sam_results[0]["snippet"]
+
+        # Alpha sees only Alpha's sessions
+        alpha_results = db.search_messages("specs", personality_filter="alpha")
+        assert len(alpha_results) == 1
+        assert "reviewing" in alpha_results[0]["snippet"]
+
+    def test_search_cross_personality_blocked(self, db):
+        """A personality cannot find another personality's messages."""
+        db.create_session("s1", "cli", personality="sam")
+        db.create_session("s2", "cli", personality="alpha")
+        db.append_message("s1", "user", "Sam secret API key discussion")
+        db.append_message("s2", "user", "Alpha roadmap planning")
+
+        # Sam searching for "roadmap" should NOT find Alpha's message
+        sam_results = db.search_messages("roadmap", personality_filter="sam")
+        assert len(sam_results) == 0
+
+        # Alpha searching for "API key" should NOT find Sam's message
+        alpha_results = db.search_messages("API key", personality_filter="alpha")
+        assert len(alpha_results) == 0
+
+    def test_search_null_personality_returns_all(self, db):
+        """Sessions with NULL personality are visible to all searches."""
+        db.create_session("s1", "cli", personality=None)
+        db.create_session("s2", "cli", personality="sam")
+        db.append_message("s1", "user", "CLI general discussion about testing")
+        db.append_message("s2", "user", "Sam was testing the build")
+
+        # No filter → both visible
+        all_results = db.search_messages("testing")
+        assert len(all_results) == 2
+
+        # Sam filter → only Sam's session
+        sam_results = db.search_messages("testing", personality_filter="sam")
+        assert len(sam_results) == 1
+        assert "build" in sam_results[0]["snippet"]
