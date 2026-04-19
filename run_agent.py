@@ -1523,24 +1523,16 @@ class AIAgent:
                 for t in self.tools
                 if isinstance(t, dict)
             }
-            for _schema in self._memory_manager.get_all_tool_schemas():
+            _mem_schemas = self._memory_manager.get_all_tool_schemas()
+            for _schema in _mem_schemas:
                 _tname = _schema.get("name", "")
                 if _tname and _tname in _existing_tool_names:
                     continue  # already registered via plugin path
-            for _schema in self._memory_manager.get_all_tool_schemas():
-            _mem_schemas = self._memory_manager.get_all_tool_schemas()
-            for _schema in _mem_schemas:
                 _wrapped = {"type": "function", "function": _schema}
                 self.tools.append(_wrapped)
                 if _tname:
                     self.valid_tool_names.add(_tname)
                     _existing_tool_names.add(_tname)
-        else:
-            logger.info(
-                "[MemDebug] Tool injection SKIPPED: _memory_manager=%s, tools=%s",
-                self._memory_manager is not None,
-                "None" if self.tools is None else f"len={len(self.tools)}",
-            )
         else:
             logger.info(
                 "[MemDebug] Tool injection SKIPPED: _memory_manager=%s, tools=%s",

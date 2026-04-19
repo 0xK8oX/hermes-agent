@@ -193,7 +193,22 @@ def _on_new_session(session_key: str, event: Any) -> None:
     Resolution order:
     1. ``event.extra["channel_binding"]`` — set by platform adapter (Discord)
     2. Session-key → config match — works for any platform without adapter changes
+
+    If a dynamic binding already exists (e.g. set via ``/bind`` and preserved
+    through ``_on_session_reset``), we skip re-applying from config so that the
+    user's ephemeral choice is not overwritten.
     """
+
+    # Guard: if a dynamic binding was already applied (e.g. /bind → reset →
+    # new-session), don't overwrite it with the config-level default.
+    with _state_lock:
+        existing = _session_bindings.get(session_key)
+    if existing:
+        logger.debug(
+            "[ChannelBinding] _on_new_session: keeping existing dynamic binding for %s",
+            session_key[:30],
+        )
+        return
 
     binding = None
 
@@ -259,18 +274,44 @@ def _apply_binding_unlocked(session_key: str, binding: dict) -> None:
     # Store model override (keep raw api_key for safe /bind save)
     if model:
         raw_api_key = binding.get("api_key")
+        resolved_base_url = binding.get("base_url")
+        resolved_provider = binding.get("provider")
+        resolved_api_mode = None
+
+        # Auto-resolve base_url from custom_providers config when provider
+        # uses the ``custom:<name>`` format but no explicit base_url is set.
+        if not resolved_base_url and resolved_provider and str(resolved_provider).startswith("custom:"):
+            try:
+                from hermes_cli.runtime_provider import _get_named_custom_provider
+                cp = _get_named_custom_provider(str(resolved_provider))
+                if cp:
+                    resolved_base_url = resolved_base_url or cp.get("base_url")
+                    resolved_api_mode = resolved_api_mode or cp.get("api_mode")
+                    if not _expand_api_key(raw_api_key):
+                        raw_api_key = raw_api_key or cp.get("api_key")
+            except Exception as _cp_err:
+                logger.debug("[ChannelBinding] custom provider resolve failed: %s", _cp_err)
+
         _session_model_overrides[session_key] = {
             "model": model,
-            "provider": binding.get("provider"),
+            "provider": resolved_provider,
             "api_key": _expand_api_key(raw_api_key),
             "api_key_raw": raw_api_key,
-            "base_url": binding.get("base_url"),
-            "api_mode": None,
+            "base_url": resolved_base_url,
+            "api_mode": resolved_api_mode,
         }
         logger.info(
-            "[ChannelBinding] Model '%s' (provider=%s) → session %s",
-            model, binding.get("provider"), session_key[:30],
+            "[ChannelBinding] Model '%s' (provider=%s, base_url=%s) → session %s",
+            model, resolved_provider, resolved_base_url, session_key[:30],
         )
+    else:
+        # New soul has no model — clear any stale override from the previous soul
+        cleared = _session_model_overrides.pop(session_key, None)
+        if cleared:
+            logger.info(
+                "[ChannelBinding] Cleared stale model override '%s' for session %s",
+                cleared.get("model"), session_key[:30],
+            )
 
     # Store memory scope
     if memory_scope and isinstance(memory_scope, str):
@@ -415,7 +456,6 @@ def _on_session_reset(session_key: str) -> None:
     """
     global _CONFIG_BINDINGS_CACHE
     _CONFIG_BINDINGS_CACHE = None
-
 
     with _state_lock:
         binding = _session_bindings.get(session_key)

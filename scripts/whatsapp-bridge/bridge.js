@@ -228,7 +228,10 @@ async function startSocket() {
       }
 
       // Check allowlist for messages from others (resolve LID ↔ phone aliases)
-      if (!msg.key.fromMe && !matchesAllowedUser(senderId, ALLOWED_USERS, SESSION_DIR)) {
+      // Skip allowlist for group messages — gateway handles authorization via
+      // bound-group logic (is_channel_bound), so group members can chat even
+      // if they aren't in WHATSAPP_ALLOWED_USERS.
+      if (!msg.key.fromMe && !isGroup && !matchesAllowedUser(senderId, ALLOWED_USERS, SESSION_DIR)) {
         try {
           console.log(JSON.stringify({
             event: 'ignored',
@@ -384,9 +387,21 @@ app.post('/send', async (req, res) => {
     return res.status(503).json({ error: 'Not connected to WhatsApp' });
   }
 
-  const { chatId, message, replyTo } = req.body;
+  let { chatId, message, replyTo } = req.body;
   if (!chatId || !message) {
     return res.status(400).json({ error: 'chatId and message are required' });
+  }
+
+  // Auto-complete JID suffix if missing
+  // Groups: 120363427845408535@g.us → contain "-" or start with "1203" (WhatsApp community groups)
+  // DMs: just numbers → @s.whatsapp.net
+  if (!chatId.includes('@')) {
+    // Guess: groups contain "-" or are longer than 16 digits (communities)
+    if (chatId.includes('-') || chatId.length >= 16 || chatId.startsWith('1203')) {
+      chatId = `${chatId}@g.us`;
+    } else {
+      chatId = `${chatId}@s.whatsapp.net`;
+    }
   }
 
   try {
@@ -412,9 +427,21 @@ app.post('/edit', async (req, res) => {
     return res.status(503).json({ error: 'Not connected to WhatsApp' });
   }
 
-  const { chatId, messageId, message } = req.body;
+  let { chatId, messageId, message } = req.body;
   if (!chatId || !messageId || !message) {
     return res.status(400).json({ error: 'chatId, messageId, and message are required' });
+  }
+
+  // Auto-complete JID suffix if missing
+  // Groups: 120363427845408535@g.us → contain "-" or start with "1203" (WhatsApp community groups)
+  // DMs: just numbers → @s.whatsapp.net
+  if (!chatId.includes('@')) {
+    // Guess: groups contain "-" or are longer than 16 digits (communities)
+    if (chatId.includes('-') || chatId.length >= 16 || chatId.startsWith('1203')) {
+      chatId = `${chatId}@g.us`;
+    } else {
+      chatId = `${chatId}@s.whatsapp.net`;
+    }
   }
 
   try {
@@ -451,9 +478,21 @@ app.post('/send-media', async (req, res) => {
     return res.status(503).json({ error: 'Not connected to WhatsApp' });
   }
 
-  const { chatId, filePath, mediaType, caption, fileName } = req.body;
+  let { chatId, filePath, mediaType, caption, fileName } = req.body;
   if (!chatId || !filePath) {
     return res.status(400).json({ error: 'chatId and filePath are required' });
+  }
+
+  // Auto-complete JID suffix if missing
+  // Groups: 120363427845408535@g.us → contain "-" or start with "1203" (WhatsApp community groups)
+  // DMs: just numbers → @s.whatsapp.net
+  if (!chatId.includes('@')) {
+    // Guess: groups contain "-" or are longer than 16 digits (communities)
+    if (chatId.includes('-') || chatId.length >= 16 || chatId.startsWith('1203')) {
+      chatId = `${chatId}@g.us`;
+    } else {
+      chatId = `${chatId}@s.whatsapp.net`;
+    }
   }
 
   try {
