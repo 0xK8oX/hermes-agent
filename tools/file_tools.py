@@ -110,6 +110,72 @@ _SENSITIVE_PATH_PREFIXES = (
 _SENSITIVE_EXACT_PATHS = {"/var/run/docker.sock", "/run/docker.sock"}
 
 
+def _check_bound_channel_permission(filepath: str, task_id: str) -> str | None:
+    """Check if a bound channel session has permission to write to Hermes config paths.
+
+    Bound channel souls (e.g. a soul bound to a Discord channel) are restricted
+    from writing to critical Hermes paths (config.yaml, souls/) unless the soul's
+    frontmatter has ``allow_config_write: true``.  Unbound sessions (CLI, admin DM)
+    are unrestricted.
+
+    Returns an error message if the write should be blocked, or ``None`` to allow.
+    """
+    # Only applies to gateway sessions (task_id is a session key)
+    if not task_id or not task_id.startswith("agent:main:"):
+        return None  # CLI or non-gateway mode — allow
+
+    # Resolve hermes home
+    try:
+        from hermes_constants import get_hermes_home
+        hermes_home = str(get_hermes_home().resolve())
+    except ImportError:
+        hermes_home = os.path.realpath(os.path.expanduser("~/.hermes"))
+
+    # Resolve the target path
+    try:
+        resolved = os.path.realpath(os.path.expanduser(filepath))
+    except (OSError, ValueError):
+        resolved = filepath
+
+    # Protected Hermes paths: config.yaml, souls/, and config backups
+    _protected_prefixes = [
+        os.path.join(hermes_home, "souls") + os.sep,
+        os.path.join(hermes_home, "souls") + os.sep.replace("/", ""),
+    ]
+    _protected_exact = {
+        os.path.join(hermes_home, "config.yaml"),
+        os.path.join(hermes_home, "config.yaml.bak"),
+        os.path.join(hermes_home, "config.yaml.tmp"),
+    }
+
+    is_protected = False
+    if resolved in _protected_exact:
+        is_protected = True
+    else:
+        for prefix in _protected_prefixes:
+            if resolved.startswith(prefix) or resolved == prefix.rstrip(os.sep):
+                is_protected = True
+                break
+
+    if not is_protected:
+        return None  # Not a protected path — allow
+
+    # Check if the session's soul allows config writes
+    try:
+        from gateway.extensions.channel_binding import has_config_write_permission
+        if has_config_write_permission(task_id):
+            return None  # Explicitly allowed — allow
+    except Exception:
+        # If channel_binding is not available (e.g. tests, CLI), allow
+        return None
+
+    return (
+        f"⛔ Refusing to write to Hermes config path: {filepath}\n"
+        f"Bound channel souls cannot modify Hermes configuration.\n"
+        f"Add `allow_config_write: true` to the soul's frontmatter if needed."
+    )
+
+
 def _check_sensitive_path(filepath: str) -> str | None:
     """Return an error message if the path targets a sensitive system location."""
     try:
@@ -613,6 +679,9 @@ def write_file_tool(path: str, content: str, task_id: str = "default") -> str:
     sensitive_err = _check_sensitive_path(path)
     if sensitive_err:
         return tool_error(sensitive_err)
+    bound_err = _check_bound_channel_permission(path, task_id)
+    if bound_err:
+        return tool_error(bound_err)
     try:
         stale_warning = _check_file_staleness(path, task_id)
         file_ops = _get_file_ops(task_id)
@@ -648,6 +717,9 @@ def patch_tool(mode: str = "replace", path: str = None, old_string: str = None,
         sensitive_err = _check_sensitive_path(_p)
         if sensitive_err:
             return tool_error(sensitive_err)
+        bound_err = _check_bound_channel_permission(_p, task_id)
+        if bound_err:
+            return tool_error(bound_err)
     try:
         # Check staleness for all files this patch will touch.
         stale_warnings = []

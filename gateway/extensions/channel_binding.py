@@ -86,6 +86,9 @@ _session_skills: Dict[str, List[str]] = {}
 # memory scope per session: {session_key: str}
 _session_memory_scopes: Dict[str, str] = {}
 
+# allow_config_write per session: {session_key: bool}
+_session_allow_config_write: Dict[str, bool] = {}
+
 # Config cache for cross-platform binding resolution (invalidated on /reset)
 _CONFIG_BINDINGS_CACHE: Optional[Dict[str, list]] = None
 
@@ -321,6 +324,21 @@ def _apply_binding_unlocked(session_key: str, binding: dict) -> None:
             memory_scope, session_key[:30],
         )
 
+    # Parse allow_config_write from soul frontmatter
+    allow_config_write = False
+    if soul_name and isinstance(soul_name, str):
+        result = _load_soul_with_meta(soul_name)
+        if result:
+            _, meta = result
+            if isinstance(meta, dict):
+                allow_config_write = bool(meta.get("allow_config_write", False))
+    _session_allow_config_write[session_key] = allow_config_write
+    if allow_config_write:
+        logger.info(
+            "[ChannelBinding] allow_config_write=True → session %s",
+            session_key[:30],
+        )
+
 
 def _enrich_from_soul_frontmatter(entry: dict) -> dict:
     """Enrich a config binding entry with fields from its soul's frontmatter.
@@ -529,6 +547,7 @@ def _on_session_cleanup(session_key: str) -> None:
         _session_bindings.pop(session_key, None)
         _session_skills.pop(session_key, None)
         _session_memory_scopes.pop(session_key, None)
+        _session_allow_config_write.pop(session_key, None)
 
 
 def _ensure_binding_loaded(session_key: str) -> None:
@@ -1197,6 +1216,7 @@ async def handle_bind_command(session_store, event) -> str:
             _session_model_overrides.pop(session_key, None)
             _session_skills.pop(session_key, None)
             _session_memory_scopes.pop(session_key, None)
+            _session_allow_config_write.pop(session_key, None)
             _bound_channel_index.pop((platform, channel_id), None)
 
         if error:
@@ -1219,6 +1239,7 @@ async def handle_bind_command(session_store, event) -> str:
             _session_model_overrides.pop(session_key, None)
             _session_skills.pop(session_key, None)
             _session_memory_scopes.pop(session_key, None)
+            _session_allow_config_write.pop(session_key, None)
             if parsed:
                 _bound_channel_index.pop(
                     (parsed.get("platform", ""), parsed.get("channel_id", "")), None
@@ -1359,3 +1380,21 @@ def is_channel_bound(platform: str, chat_id: str) -> bool:
             return True
 
     return False
+
+
+def has_config_write_permission(session_key: str) -> bool:
+    """Check if the session's bound soul allows writing to Hermes config paths.
+
+    Returns True if the session's soul has ``allow_config_write: true`` in
+    its frontmatter, or if the session has no binding (unbound sessions
+    default to allowed for backward compatibility).
+
+    Used by ``tools/file_tools.py`` to gate writes to config.yaml, souls/,
+    and other protected Hermes paths from bound channel agents.
+    """
+    _ensure_binding_loaded(session_key)
+    with _state_lock:
+        # No binding = not a bound channel, allow by default
+        if session_key not in _session_bindings:
+            return True
+        return _session_allow_config_write.get(session_key, False)
