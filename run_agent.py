@@ -5500,6 +5500,8 @@ class AIAgent:
             return result["response"]
 
         result = {"response": None, "error": None, "partial_tool_names": []}
+        result = {"response": None, "error": None}
+        result = {"response": None, "error": None, "partial_tool_names": []}
         request_client_holder = {"client": None}
         first_delta_fired = {"done": False}
         deltas_were_sent = {"yes": False}  # Track if any deltas were fired (for fallback)
