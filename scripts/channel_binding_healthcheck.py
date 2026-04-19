@@ -82,61 +82,92 @@ def expand_api_key(raw_key):
     return raw_key
 
 
+def _load_global_model_config():
+    """Load the global model config (model.default) from config.yaml."""
+    import yaml
+    config_path = HERMES_HOME / "config.yaml"
+    if not config_path.exists():
+        return {}
+    with open(config_path) as f:
+        cfg = yaml.safe_load(f) or {}
+    model_cfg = cfg.get("model", {})
+    return {
+        "model": model_cfg.get("default", ""),
+        "provider": model_cfg.get("provider"),
+        "api_key": model_cfg.get("api_key"),
+        "base_url": model_cfg.get("base_url"),
+    }
+
+
+def _resolve_custom_provider(provider_name, config_cfg=None):
+    """Resolve a custom:xxx provider from config.yaml custom_providers list."""
+    if not provider_name or not provider_name.startswith("custom:"):
+        return None
+    custom_name = provider_name[7:]  # strip "custom:"
+    import yaml
+    config_path = HERMES_HOME / "config.yaml"
+    with open(config_path) as f:
+        cfg = config_cfg or yaml.safe_load(f) or {}
+    for cp in cfg.get("custom_providers", []):
+        cp_name = cp.get("name", "").lower().replace(" ", "-")
+        if cp_name == custom_name.lower() or cp.get("name") == custom_name:
+            return cp
+    return None
+
+
 def resolve_binding_runtime(binding):
     """Resolve the full runtime config for a binding.
 
-    If binding has explicit model/provider/api_key/base_url, use those.
-    Otherwise fall back to the default provider.
+    Mirrors gateway's _resolve_session_agent_runtime():
+    - If binding has explicit model/provider/api_key/base_url, use directly
+    - If provider is "custom:xxx", resolve from custom_providers
+    - If no model override, use global model.default config
+    - api_mode: determined by provider type (anthropic → anthropic_messages, else chat_completions)
     """
-    from hermes_cli.runtime_provider import resolve_runtime_provider
-
-    # Start with default provider
-    default_runtime = resolve_runtime_provider()
+    global_cfg = _load_global_model_config()
 
     model = binding.get("model")
     provider = binding.get("provider")
     api_key = expand_api_key(binding.get("api_key"))
     base_url = binding.get("base_url")
 
+    # No model override → use global default
     if not model:
-        # No model override — use default
         return {
-            "model": default_runtime.get("api_key", "").split(".")[-1][:10] if default_runtime.get("api_key") else "default",
-            "provider": default_runtime.get("provider"),
-            "api_key": default_runtime.get("api_key"),
-            "base_url": default_runtime.get("base_url"),
-            "api_mode": default_runtime.get("api_mode"),
-            "_source": "default",
+            "model": global_cfg.get("model", ""),
+            "provider": global_cfg.get("provider") or "custom",
+            "api_key": global_cfg.get("api_key"),
+            "base_url": global_cfg.get("base_url"),
+            "api_mode": "chat_completions",
+            "_source": "global-default",
         }
 
-    # If provider is "custom:xxx", resolve from custom_providers
+    # Provider is "custom:xxx" → resolve from custom_providers
     if provider and provider.startswith("custom:"):
-        custom_name = provider[7:]  # strip "custom:"
-        # Try to find it in custom_providers list
-        import yaml
-        config_path = HERMES_HOME / "config.yaml"
-        with open(config_path) as f:
-            cfg = yaml.safe_load(f)
-        custom_providers = cfg.get("custom_providers", [])
-        for cp in custom_providers:
-            cp_name = cp.get("name", "").lower().replace(" ", "-")
-            if cp_name == custom_name.lower() or cp.get("name") == custom_name:
-                return {
-                    "model": model,
-                    "provider": "custom",
-                    "api_key": cp.get("api_key", api_key),
-                    "base_url": cp.get("base_url", base_url),
-                    "api_mode": cp.get("api_mode", "chat_completions"),
-                    "_source": f"custom:{cp.get('name')}",
-                }
+        cp = _resolve_custom_provider(provider)
+        if cp:
+            return {
+                "model": model,
+                "provider": "custom",
+                "api_key": cp.get("api_key", api_key),
+                "base_url": cp.get("base_url", base_url),
+                "api_mode": cp.get("api_mode", "chat_completions"),
+                "_source": f"custom:{cp.get('name')}",
+            }
+
+    # Direct binding — use exactly what's configured
+    # Determine api_mode from provider
+    api_mode = "chat_completions"
+    if provider == "anthropic" or (base_url and "/anthropic" in base_url):
+        api_mode = "anthropic_messages"
 
     return {
         "model": model,
-        "provider": provider or default_runtime.get("provider"),
-        "api_key": api_key or default_runtime.get("api_key"),
-        "base_url": base_url or default_runtime.get("base_url"),
-        "api_mode": default_runtime.get("api_mode", "chat_completions"),
-        "_source": "binding",
+        "provider": provider or global_cfg.get("provider") or "custom",
+        "api_key": api_key or global_cfg.get("api_key"),
+        "base_url": base_url or global_cfg.get("base_url"),
+        "api_mode": api_mode,
+        "_source": "binding-direct",
     }
 
 
