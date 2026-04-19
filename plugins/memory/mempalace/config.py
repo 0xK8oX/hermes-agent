@@ -29,6 +29,8 @@ _DEFAULTS: Dict[str, Any] = {
     "l1_max_drawers": 15,
     "search_n_results": 5,
     "search_max_distance": 0.8,
+    "dedup_threshold": 0.35,   # cosine distance; 0.35 ≈ sim 0.65, tuned for BGE-M3 zh+en
+    "dedup_scope": "wing",     # "wing" = all rooms in same wing | "room" = same room only
 }
 
 
@@ -81,6 +83,15 @@ class MemPalaceConfig:
     @property
     def search_max_distance(self) -> float:
         return float(self._cfg.get("search_max_distance", _DEFAULTS["search_max_distance"]))
+
+    @property
+    def dedup_threshold(self) -> float:
+        return float(self._cfg.get("dedup_threshold", _DEFAULTS["dedup_threshold"]))
+
+    @property
+    def dedup_scope(self) -> str:
+        val = self._cfg.get("dedup_scope", _DEFAULTS["dedup_scope"])
+        return val if val in ("wing", "room") else _DEFAULTS["dedup_scope"]
 
     # -- internal -------------------------------------------------------------
 

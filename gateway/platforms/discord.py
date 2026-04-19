@@ -3116,9 +3116,27 @@ class DiscordAdapter(BasePlatformAdapter):
         # so forum descriptions (e.g. project instructions) appear in the session context.
         chat_topic = self._get_effective_topic(message.channel, is_thread=is_thread)
 
+        # Determine the chat_id for session key construction.
+        # For threads, use the parent channel ID so that session_key position 4
+        # matches config bindings (which use parent channel IDs, not thread IDs).
+        # This ensures _resolve_binding_from_session_key can match correctly
+        # after gateway restarts when in-memory state is lost.
+        if is_thread:
+            # Auto-thread first message: message.channel is the parent TextChannel
+            # Existing thread message: message.channel is the Thread (parent_id points to parent)
+            if auto_threaded_channel:
+                # First message in auto-thread: message.channel is the parent TextChannel
+                chat_id_for_key = str(message.channel.id)
+            else:
+                # Message inside an existing thread: message.channel is a Thread object
+                _parent_id = getattr(message.channel, "parent_id", None)
+                chat_id_for_key = str(_parent_id) if _parent_id else str(message.channel.id)
+        else:
+            chat_id_for_key = str(effective_channel.id)
+
         # Build source
         source = self.build_source(
-            chat_id=str(effective_channel.id),
+            chat_id=chat_id_for_key,
             chat_name=chat_name,
             chat_type=chat_type,
             user_id=str(message.author.id),

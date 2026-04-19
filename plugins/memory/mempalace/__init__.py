@@ -226,7 +226,7 @@ class MemPalaceProvider(MemoryProvider):
             return
         try:
             room = f"builtin_{target}"  # "builtin_memory" or "builtin_user"
-            self._add_drawer(
+            drawer_id, _ = self._add_drawer(
                 content=content,
                 wing=self._wing or "shared",
                 room=room,
@@ -249,6 +249,7 @@ class MemPalaceProvider(MemoryProvider):
 
         if mode in ("tools", "hybrid"):
             schemas.append(_SCHEMA_MEMPALACE_ADD)
+            schemas.append(_SCHEMA_MEMPALACE_DELETE)
             schemas.append(_SCHEMA_MEMPALACE_STATUS)
 
         return schemas
@@ -261,6 +262,8 @@ class MemPalaceProvider(MemoryProvider):
             return self._tool_search(args)
         elif tool_name == "mempalace_add":
             return self._tool_add(args)
+        elif tool_name == "mempalace_delete":
+            return self._tool_delete(args)
         elif tool_name == "mempalace_status":
             return self._tool_status(args)
         else:
@@ -393,18 +396,60 @@ class MemPalaceProvider(MemoryProvider):
             with self._prefetch_lock:
                 self._prefetch_running = False
 
+    # Distance threshold for auto-dedup (cosine distance; lower = more similar)
+    # Default 0.35 ≈ cosine similarity of 0.65 — tuned for BGE-M3 zh+en mixed content
+    # Configurable via memory.mempalace.dedup_threshold
+    _DEDUP_MAX_DISTANCE = 0.35
+
     def _add_drawer(self, content: str, wing: str, room: str,
-                    importance: float = 3.0) -> str:
-        """Add a drawer to the palace."""
+                    importance: float = 3.0) -> tuple:
+        """Add a drawer to the palace with auto-dedup.
+
+        Before adding, searches for semantically similar content in the same
+        wing+room.  If found (cosine distance < _DEDUP_MAX_DISTANCE), the
+        existing drawer is updated in place instead of creating a new one.
+
+        Returns (drawer_id, action) where action is "added" or "updated".
+        """
         try:
             col = self._get_collection()
             if col is None:
                 logger.error("No ChromaDB collection available")
-                return ""
+                return ("", "error")
 
-            drawer_id = hashlib.sha256(
-                f"{content[:200]}:{time.time()}".encode()
-            ).hexdigest()[:16]
+            # --- Auto-dedup: search for similar content in same wing (any room) ---
+            replaced_id = None
+            try:
+                threshold = self._cfg.dedup_threshold if self._cfg else self._DEDUP_MAX_DISTANCE
+                scope = self._cfg.dedup_scope if self._cfg else "wing"
+                where_filter = {"wing": wing}
+                if scope == "room":
+                    where_filter = {"$and": [{"wing": wing}, {"room": room}]}
+                dup_result = col.query(
+                    query_texts=[content],
+                    n_results=1,
+                    where=where_filter,
+                    include=["documents", "metadatas", "distances"],
+                )
+                if (dup_result and dup_result.get("ids") and dup_result["ids"][0]
+                        and dup_result["distances"][0][0] < threshold):
+                    replaced_id = dup_result["ids"][0][0]
+                    logger.info(
+                        "MemPalace auto-dedup: replacing drawer %s (distance=%.4f)",
+                        replaced_id, dup_result["distances"][0][0],
+                    )
+            except Exception as e:
+                logger.debug("Auto-dedup search failed (will add new): %s", e)
+
+            if replaced_id:
+                # Update existing drawer in place
+                drawer_id = replaced_id
+                action = "updated"
+            else:
+                drawer_id = hashlib.sha256(
+                    f"{content[:200]}:{time.time()}".encode()
+                ).hexdigest()[:16]
+                action = "added"
 
             col.upsert(
                 ids=[drawer_id],
@@ -417,11 +462,11 @@ class MemPalaceProvider(MemoryProvider):
                     "source": "hermes-agent",
                 }],
             )
-            return drawer_id
+            return (drawer_id, action)
 
         except Exception as e:
             logger.error("Failed to add drawer: %s", e)
-            return ""
+            return ("", "error")
 
     def _ensure_kg(self):
         """Lazy-init knowledge graph."""
@@ -486,7 +531,12 @@ class MemPalaceProvider(MemoryProvider):
             return json.dumps({"error": str(e), "results": []})
 
     def _tool_add(self, args: Dict[str, Any]) -> str:
-        """Handle mempalace_add tool call."""
+        """Handle mempalace_add tool call.
+
+        Auto-dedup: if semantically similar content exists in the same
+        wing+room (cosine distance < 0.15), the existing drawer is updated
+        in place and the response indicates "updated" instead of "added".
+        """
         content = args.get("content", "")
         wing = args.get("wing", self._wing or "shared")
         room = args.get("room", "general")
@@ -495,7 +545,7 @@ class MemPalaceProvider(MemoryProvider):
         if not content.strip():
             return json.dumps({"error": "Content cannot be empty"})
 
-        drawer_id = self._add_drawer(content, wing, room, importance)
+        drawer_id, action = self._add_drawer(content, wing, room, importance)
         if drawer_id:
             # Also add to knowledge graph if enabled
             kg = self._ensure_kg()
@@ -513,8 +563,46 @@ class MemPalaceProvider(MemoryProvider):
                 "drawer_id": drawer_id,
                 "wing": wing,
                 "room": room,
+                "action": action,
             })
         return json.dumps({"error": "Failed to add drawer"})
+
+    def _tool_delete(self, args: Dict[str, Any]) -> str:
+        """Handle mempalace_delete tool call.
+
+        Delete a specific drawer by ID.  The LLM should search first to
+        find the drawer ID, then call delete.
+        """
+        drawer_id = args.get("drawer_id", "").strip()
+        if not drawer_id:
+            return json.dumps({"error": "drawer_id is required. Use mempalace_search first to find the ID."})
+
+        try:
+            col = self._get_collection()
+            if col is None:
+                return json.dumps({"error": "ChromaDB not initialized"})
+
+            # Verify drawer exists
+            existing = col.get(ids=[drawer_id], include=["metadatas"])
+            if not existing or not existing.get("ids") or drawer_id not in existing["ids"]:
+                return json.dumps({"error": f"Drawer {drawer_id} not found"})
+
+            # Get metadata for confirmation message
+            meta = {}
+            if existing.get("metadatas") and existing["metadatas"]:
+                meta = existing["metadatas"][0] or {}
+
+            # Delete
+            col.delete(ids=[drawer_id])
+
+            return json.dumps({
+                "success": True,
+                "deleted_drawer": drawer_id,
+                "wing": meta.get("wing", ""),
+                "room": meta.get("room", ""),
+            })
+        except Exception as e:
+            return json.dumps({"error": str(e)})
 
     def _tool_status(self, args: Dict[str, Any]) -> str:
         """Handle mempalace_status tool call."""
@@ -608,7 +696,9 @@ _SCHEMA_MEMPALACE_ADD = {
         "File content into the MemPalace long-term memory as a drawer. "
         "Use this to remember important facts, user preferences, decisions, or key information "
         "that should persist across sessions. Content is stored with wing/room metadata "
-        "and becomes searchable."
+        "and becomes searchable. "
+        "AUTO-DEDUP: if semantically similar content already exists in the same wing+room, "
+        "the existing drawer is updated in place — no duplicates will be created."
     ),
     "parameters": {
         "type": "object",
@@ -633,6 +723,25 @@ _SCHEMA_MEMPALACE_ADD = {
             },
         },
         "required": ["content"],
+    },
+}
+
+_SCHEMA_MEMPALACE_DELETE = {
+    "name": "mempalace_delete",
+    "description": (
+        "Delete a specific memory drawer by ID. Use mempalace_search first to find the "
+        "drawer ID, then call mempalace_delete to remove it. Use this when the user "
+        "explicitly asks to forget or remove a specific piece of information."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "drawer_id": {
+                "type": "string",
+                "description": "The ID of the drawer to delete. Get this from mempalace_search results.",
+            },
+        },
+        "required": ["drawer_id"],
     },
 }
 

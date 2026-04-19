@@ -4461,6 +4461,7 @@ class GatewayRunner:
                 run_generation=run_generation,
                 event_message_id=event.message_id,
                 channel_prompt=event.channel_prompt,
+                event_extra=getattr(event, "extra", None),
             )
 
             # Stop persistent typing indicator now that the agent is done
@@ -9320,6 +9321,7 @@ class GatewayRunner:
         _interrupt_depth: int = 0,
         event_message_id: Optional[str] = None,
         channel_prompt: Optional[str] = None,
+        event_extra: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Run the agent with the given message and context.
@@ -9837,12 +9839,12 @@ class GatewayRunner:
                 _persist_mem_scope = fire_hooks_first("get_memory_scope", session_key)
             except Exception:
                 pass
-            # Direct fallback: read from event.extra["channel_binding"] which
-            # the Discord adapter already resolves via parent_id (L2563-2567).
-            # The hook-based resolution fails for threads because the session
+            # Direct fallback: read from event_extra["channel_binding"] which
+            # the Discord adapter already resolves via parent_id.
+            # The hook-based resolution may fail for threads because the session
             # key contains the thread ID, not the parent channel ID.
             if not _persist_mem_scope:
-                _ev_binding = getattr(event, "extra", {}).get("channel_binding") if event else None
+                _ev_binding = (event_extra or {}).get("channel_binding")
                 if _ev_binding and isinstance(_ev_binding, dict):
                     _persist_mem_scope = _ev_binding.get("memory_scope")
 
@@ -10826,6 +10828,7 @@ class GatewayRunner:
                     _interrupt_depth=_interrupt_depth + 1,
                     event_message_id=next_message_id,
                     channel_prompt=next_channel_prompt,
+                    event_extra=getattr(pending_event, "extra", None) if pending_event else event_extra,
                 )
         finally:
             # Stop progress sender, interrupt monitor, and notification task
