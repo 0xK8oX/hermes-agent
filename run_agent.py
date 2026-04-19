@@ -1498,12 +1498,6 @@ class AIAgent:
                         if getattr(self, "_soul_content", None):
                             _init_kwargs["soul_content"] = self._soul_content
                         self._memory_manager.initialize_all(**_init_kwargs)
-                        logger.info(
-                            "[MemDebug] initialize_all done: memory_scope=%s, providers=%s, tool_schemas=%d",
-                            self._memory_scope,
-                            [p.name for p in self._memory_manager.providers],
-                            len(self._memory_manager.get_all_tool_schemas()),
-                        )
                         logger.info("Memory provider '%s' activated", _mem_provider_name)
                     else:
                         logger.debug("Memory provider '%s' not found or not available", _mem_provider_name)
@@ -1520,7 +1514,6 @@ class AIAgent:
         # MiMo via Nous Portal).
         # Inject memory provider tool schemas into the tool surface
         # Inject memory provider tool schemas into the tool surface
-        _mem_schemas = []
         if self._memory_manager and self.tools is not None:
             _existing_tool_names = {
                 t.get("function", {}).get("name")
@@ -1533,18 +1526,18 @@ class AIAgent:
                     continue  # already registered via plugin path
             for _schema in self._memory_manager.get_all_tool_schemas():
             _mem_schemas = self._memory_manager.get_all_tool_schemas()
-            logger.info(
-                "[MemDebug] Tool injection: _memory_manager=%s, tools=%d, mem_schemas=%d",
-                self._memory_manager is not None,
-                len(self.tools) if self.tools else -1,
-                len(_mem_schemas),
-            )
             for _schema in _mem_schemas:
                 _wrapped = {"type": "function", "function": _schema}
                 self.tools.append(_wrapped)
                 if _tname:
                     self.valid_tool_names.add(_tname)
                     _existing_tool_names.add(_tname)
+        else:
+            logger.info(
+                "[MemDebug] Tool injection SKIPPED: _memory_manager=%s, tools=%s",
+                self._memory_manager is not None,
+                "None" if self.tools is None else f"len={len(self.tools)}",
+            )
         else:
             logger.info(
                 "[MemDebug] Tool injection SKIPPED: _memory_manager=%s, tools=%s",

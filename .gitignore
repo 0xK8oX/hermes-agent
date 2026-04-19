@@ -68,3 +68,7 @@ mini-swe-agent/
 .nix-stamps/
 result
 website/static/api/skills-index.json
+
+# Runtime artifacts
+output.log
+gateway.log
