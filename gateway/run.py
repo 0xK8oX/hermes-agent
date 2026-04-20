@@ -11053,9 +11053,10 @@ class GatewayRunner:
                             _raw_desc = _act.get("last_activity_desc", "")
                             _cur_tool = _act.get("current_tool")
                             # Build a phase key: tool name + base description
-                            # (strip timing/counters like "(10s elapsed)" or "#5")
+                            # (strip timing/counters like "(10s elapsed)",
+                            #  "(30s, no chunks yet)" or "#5")
                             import re as _re
-                            _phase_base = _re.sub(r'\(\d+s elapsed\)', '', _raw_desc)
+                            _phase_base = _re.sub(r'\(\d+s[^)]*\)', '', _raw_desc)
                             _phase_base = _re.sub(r'#\d+', '#N', _phase_base).strip()
                             _phase_key = f"{_cur_tool or 'none'}:{_phase_base}"
                             _now_ts = time.time()
