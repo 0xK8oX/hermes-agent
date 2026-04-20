@@ -56,6 +56,7 @@ class MemPalaceProvider(MemoryProvider):
     def __init__(self) -> None:
         self._cfg: Optional[MemPalaceConfig] = None
         self._wing: Optional[str] = None
+        self._wing_mode: str = "shared"  # shared | isolated | all | disabled
         self._session_id: str = ""
         self._platform: str = "cli"
         self._hermes_home: str = ""
@@ -104,7 +105,21 @@ class MemPalaceProvider(MemoryProvider):
         self._cfg = MemPalaceConfig(hermes_home=self._hermes_home)
 
         # Scope → Wing mapping from channel binding
-        self._wing = kwargs.get("memory_scope") or None
+        memory_scope = kwargs.get("memory_scope")
+        if memory_scope == "*":
+            self._wing = None  # None means no filter → all wings
+            self._wing_mode = "all"
+        elif memory_scope == "-":
+            self._wing = None
+            self._wing_mode = "disabled"
+        elif not memory_scope or memory_scope == "shared":
+            # Default: use _global wing for shared context
+            self._wing = "_global"
+            self._wing_mode = "shared"
+        else:
+            # Named scope: only own wing
+            self._wing = memory_scope
+            self._wing_mode = "isolated"
 
         # Soul content for cold start semantic gate
         self._soul_content = kwargs.get("soul_content") or None
@@ -136,6 +151,8 @@ class MemPalaceProvider(MemoryProvider):
     def system_prompt_block(self) -> str:
         """Return L0+L1 context for the system prompt (~600-900 tokens)."""
         if self._cron_skipped or not self._initialized:
+            return ""
+        if self._wing_mode == 'disabled':
             return ""
 
         if self._layers_baked:
@@ -396,11 +413,13 @@ class MemPalaceProvider(MemoryProvider):
 
     def _auto_mine_facts(self, user_content: str) -> None:
         """Background thread: detect and save personal facts with semantic gate."""
+        if self._wing_mode == 'disabled':
+            return
         facts = self._detect_personal_facts(user_content)
         if not facts:
             return
 
-        wing = self._wing or "shared"
+        wing = self._wing or "_global"
 
         for fact in facts:
             try:
@@ -461,7 +480,7 @@ class MemPalaceProvider(MemoryProvider):
             room = f"builtin_{target}"  # "builtin_memory" or "builtin_user"
             drawer_id, _ = self._add_drawer(
                 content=content,
-                wing=self._wing or "shared",
+                wing=self._wing or "_global",
                 room=room,
                 importance=3,
             )
@@ -716,10 +735,30 @@ class MemPalaceProvider(MemoryProvider):
             logger.debug("KnowledgeGraph init failed: %s", e)
             return None
 
+    def _enforce_wing(self, requested_wing: Optional[str]) -> Optional[str]:
+        """Enforce wing isolation based on _wing_mode.
+
+        - isolated: always returns self._wing (ignores LLM-supplied value)
+        - shared: returns self._wing ("_global") or requested_wing if None
+        - all: returns requested_wing (no filter)
+        - disabled: returns None (blocks all access — defense in depth)
+        """
+        mode = self._wing_mode
+        if mode == 'disabled':
+            return None  # Block all memory access
+        if mode == 'isolated':
+            return self._wing  # Always enforce own wing, ignore LLM override
+        if mode == 'all':
+            return requested_wing  # Allow cross-wing queries (admin/wildcard)
+        # shared: default to _global, allow explicit override within shared scope
+        return requested_wing or self._wing
+
     def _tool_search(self, args: Dict[str, Any]) -> str:
         """Handle mempalace_search tool call."""
+        if self._wing_mode == 'disabled':
+            return json.dumps({"results": [], "total": 0})
         query = args.get("query", "")
-        wing = args.get("wing", self._wing)
+        wing = self._enforce_wing(args.get("wing"))
         room = args.get("room")
         n_results = args.get("n_results", self._cfg.search_n_results)
 
@@ -770,8 +809,10 @@ class MemPalaceProvider(MemoryProvider):
         wing+room (cosine distance < 0.15), the existing drawer is updated
         in place and the response indicates "updated" instead of "added".
         """
+        if self._wing_mode == 'disabled':
+            return json.dumps({"error": "Memory disabled for this scope", "success": False})
         content = args.get("content", "")
-        wing = args.get("wing", self._wing or "shared")
+        wing = self._enforce_wing(args.get("wing")) or "_global"
         room = args.get("room", "general")
         importance = args.get("importance", 3.0)
 
@@ -806,6 +847,8 @@ class MemPalaceProvider(MemoryProvider):
         Delete a specific drawer by ID.  The LLM should search first to
         find the drawer ID, then call delete.
         """
+        if self._wing_mode == 'disabled':
+            return json.dumps({"error": "Memory disabled for this scope", "success": False})
         drawer_id = args.get("drawer_id", "").strip()
         if not drawer_id:
             return json.dumps({"error": "drawer_id is required. Use mempalace_search first to find the ID."})
@@ -820,10 +863,28 @@ class MemPalaceProvider(MemoryProvider):
             if not existing or not existing.get("ids") or drawer_id not in existing["ids"]:
                 return json.dumps({"error": f"Drawer {drawer_id} not found"})
 
-            # Get metadata for confirmation message
+            # Get metadata for wing ownership check + confirmation
             meta = {}
             if existing.get("metadatas") and existing["metadatas"]:
                 meta = existing["metadatas"][0] or {}
+
+            # Wing ownership check: only delete from wings this session can access
+            drawer_wing = meta.get("wing", "")
+            enforced_wing = self._enforce_wing(drawer_wing)  # what _enforce_wing resolves for this request
+            mode = self._wing_mode
+            if mode == 'isolated' and drawer_wing != enforced_wing:
+                return json.dumps({
+                    "error": f"Cannot delete drawer from wing '{drawer_wing}': "
+                             f"this session is isolated to wing '{enforced_wing}'",
+                    "success": False,
+                })
+            # shared mode: verify drawer belongs to a wing this session can access
+            if mode == 'shared' and enforced_wing != drawer_wing:
+                return json.dumps({
+                    "error": f"Cannot delete drawer from wing '{drawer_wing}': "
+                             f"this session can only access wing '{enforced_wing}'",
+                    "success": False,
+                })
 
             # Delete
             col.delete(ids=[drawer_id])
@@ -839,6 +900,13 @@ class MemPalaceProvider(MemoryProvider):
 
     def _tool_status(self, args: Dict[str, Any]) -> str:
         """Handle mempalace_status tool call."""
+        if self._wing_mode == 'disabled':
+            return json.dumps({
+                "total_drawers": 0,
+                "wings": {},
+                "current_wing": None,
+                "wing_mode": "disabled",
+            })
         try:
             col = self._get_collection()
             if col is None:
@@ -846,19 +914,28 @@ class MemPalaceProvider(MemoryProvider):
                     "total_drawers": 0,
                     "wings": {},
                     "current_wing": self._wing,
+                    "wing_mode": self._wing_mode,
                     "error": "ChromaDB not initialized",
                 })
+
+            mode = self._wing_mode
 
             # Get total count
             all_data = col.get(include=["metadatas"])
             total = len(all_data["ids"])
 
-            # Breakdown by wing
+            # Breakdown by wing — filter for isolated mode
             wings: Dict[str, int] = {}
             for meta in all_data.get("metadatas", []):
                 if meta:
                     w = meta.get("wing", "none")
+                    if mode == 'isolated' and w != self._wing:
+                        continue  # Don't leak other wings to isolated souls
                     wings[w] = wings.get(w, 0) + 1
+
+            # Isolated mode: only report own wing's total
+            if mode == 'isolated':
+                total = wings.get(self._wing, 0)
 
             # Knowledge graph stats
             kg_stats = None

@@ -263,10 +263,20 @@ async def _summarize_session(
 _HIDDEN_SESSION_SOURCES = ("tool",)
 
 
-def _list_recent_sessions(db, limit: int, current_session_id: str = None) -> str:
+def _list_recent_sessions(db, limit: int, current_session_id: str = None, personality_filter: str = None) -> str:
     """Return metadata for the most recent sessions (no LLM calls)."""
     try:
-        sessions = db.list_sessions_rich(limit=limit + 5, exclude_sources=list(_HIDDEN_SESSION_SOURCES))  # fetch extra to skip current
+        # Push personality filter to DB when possible; fetch extra to skip current session
+        extra = 5 if not personality_filter else 0
+        sessions = db.list_sessions_rich(
+            limit=limit + extra,
+            exclude_sources=list(_HIDDEN_SESSION_SOURCES),
+            personality=personality_filter,
+        )
+
+        # Fallback: if DB doesn't support personality filter, do it in Python
+        if personality_filter and sessions and "personality" not in sessions[0]:
+            sessions = [s for s in sessions if s.get("personality") == personality_filter]
 
         # Resolve current session lineage to exclude it
         current_root = None
@@ -345,7 +355,7 @@ def session_search(
     # Recent sessions mode: when query is empty, return metadata for recent sessions.
     # No LLM calls — just DB queries for titles, previews, timestamps.
     if not query or not query.strip():
-        return _list_recent_sessions(db, limit, current_session_id)
+        return _list_recent_sessions(db, limit, current_session_id, personality_filter=personality_filter)
 
     query = query.strip()
 

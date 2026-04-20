@@ -116,14 +116,15 @@ class TestMemPalaceProvider:
         assert p._wing == "dev"
 
     def test_memory_scope_none(self, hermes_home):
-        """No memory_scope → _wing is None (shared)."""
+        """No memory_scope → _wing is '_global' (shared)."""
         from plugins.memory.mempalace import MemPalaceProvider
         p = MemPalaceProvider()
         p.initialize(
             session_id="test",
             hermes_home=str(hermes_home),
         )
-        assert p._wing is None
+        assert p._wing == "_global"
+        assert p._wing_mode == "shared"
 
 
 # ===========================================================================

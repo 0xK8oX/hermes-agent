@@ -1,0 +1,644 @@
+→ installing pytest-split into /Users/kato/.hermes/hermes-agent/venv
+
+[notice] A new release of pip is available: 24.0 -> 26.0.1
+[notice] To update, run: pip3.11 install --upgrade pip
+▶ running pytest with 4 workers, hermetic env, in /Users/kato/.hermes/hermes-agent
+  (TZ=UTC LANG=C.UTF-8 PYTHONHASHSEED=0; all credential env vars unset)
+============================= test session starts ==============================
+platform darwin -- Python 3.11.14, pytest-9.0.3, pluggy-1.6.0
+rootdir: /Users/kato/.hermes/hermes-agent
+configfile: pyproject.toml
+plugins: xdist-3.8.0, split-0.11.0, asyncio-1.3.0, anyio-4.13.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+created: 8/8 workers
+8 workers [5043 items]
+
+........................................................................ [  1%]
+........................................................................ [  2%]
+........................................................................ [  4%]
+........................................................................ [  5%]
+........................................................................ [  7%]
+........................................................................ [  8%]
+........................................................................ [  9%]
+........................................................................ [ 11%]
+........................................................................ [ 12%]
+........................................................................ [ 14%]
+F.............................F.....................F.............F..... [ 15%]
+.F....F................................................................. [ 17%]
+.........................................F..F.F......................... [ 18%]
+........................................................................ [ 19%]
+........................................................................ [ 21%]
+........................................................................ [ 22%]
+........................................................................ [ 24%]
+........................................................................ [ 25%]
+........................................................................ [ 27%]
+........................................................................ [ 28%]
+.........................F.............................................. [ 29%]
+........................................................................ [ 31%]
+........................................................................ [ 32%]
+........................................................................ [ 34%]
+........................................................................ [ 35%]
+........................................................................ [ 37%]
+........................................................................ [ 38%]
+........................................................................ [ 39%]
+........................................................................ [ 41%]
+........................................................................ [ 42%]
+........................................................................ [ 44%]
+........................................................................ [ 45%]
+........................................................................ [ 47%]
+........................................................................ [ 48%]
+.........F...F...............................F.......................... [ 49%]
+........................................................................ [ 51%]
+........................................................................ [ 52%]
+........................................................................ [ 54%]
+........................................................................ [ 55%]
+........................................................................ [ 57%]
+........................................................................ [ 58%]
+........................................................................ [ 59%]
+........................................................................ [ 61%]
+........................................................................ [ 62%]
+........................................................................ [ 64%]
+........................................................................ [ 65%]
+........................................................................ [ 67%]
+........................................................................ [ 68%]
+........................................................................ [ 69%]
+........................................................................ [ 71%]
+........................................................................ [ 72%]
+........................................................................ [ 74%]
+........................................................................ [ 75%]
+........................................................................ [ 77%]
+........................................................................ [ 78%]
+........................................................................ [ 79%]
+........................................................................ [ 81%]
+........................................................................ [ 82%]
+.......................................................s................ [ 84%]
+........................................................................ [ 85%]
+........................................................................ [ 87%]
+........................................................................ [ 88%]
+........................................................................ [ 89%]
+..................................../Users/kato/.hermes/hermes-agent/venv/lib/python3.11/site-packages/_pytest/unraisableexception.py:33: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+  gc.collect()
+RuntimeWarning: Enable tracemalloc to get the object allocation traceback
+.................................... [ 91%]
+........................................................................ [ 92%]
+........................................................................ [ 94%]
+........................................................................ [ 95%]
+........................................................................ [ 97%]
+........................................................................ [ 98%]
+........................................................................ [ 99%]
+...                                                                      [100%]
+=================================== FAILURES ===================================
+______________ TestCardLifecycle.test_final_reply_finalizes_card _______________
+[gw4] darwin -- Python 3.11.14 /Users/kato/.hermes/hermes-agent/venv/bin/python
+
+self = <tests.gateway.test_dingtalk.TestCardLifecycle object at 0x1090a3f90>
+adapter_with_card = <gateway.platforms.dingtalk.DingTalkAdapter object at 0x111e28f50>
+
+    @pytest.mark.asyncio
+    async def test_final_reply_finalizes_card(self, adapter_with_card):
+        """send(reply_to=...) creates a closed card (final response path)."""
+        a = adapter_with_card
+        result = await a.send("chat-1", "Hello", reply_to="user-msg-1")
+>       assert result.success
+E       assert False
+E        +  where False = SendResult(success=False, message_id=None, error="'<' not supported between instances of 'AsyncMock' and 'int'", raw_response=None, retryable=False).success
+
+tests/gateway/test_dingtalk.py:784: AssertionError
+------------------------------ Captured log call -------------------------------
+WARNING  gateway.platforms.dingtalk:dingtalk.py:1000 [Dingtalk] AI Card create failed: 'NoneType' object has no attribute 'RuntimeOptions'
+Traceback (most recent call last):
+  File "/Users/kato/.hermes/hermes-agent/gateway/platforms/dingtalk.py", line 914, in _create_and_stream_card
+    runtime = tea_util_models.RuntimeOptions()
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'NoneType' object has no attribute 'RuntimeOptions'
+
+WARNING  gateway.platforms.dingtalk:dingtalk.py:823 [Dingtalk] AI Card send failed, falling back to webhook
+ERROR    gateway.platforms.dingtalk:dingtalk.py:856 [Dingtalk] Send error: '<' not supported between instances of 'AsyncMock' and 'int'
+___________ TestCardLifecycle.test_intermediate_send_stays_streaming ___________
+[gw4] darwin -- Python 3.11.14 /Users/kato/.hermes/hermes-agent/venv/bin/python
+
+self = <tests.gateway.test_dingtalk.TestCardLifecycle object at 0x1090b0810>
+adapter_with_card = <gateway.platforms.dingtalk.DingTalkAdapter object at 0x110ae0e50>
+
+    @pytest.mark.asyncio
+    async def test_intermediate_send_stays_streaming(self, adapter_with_card):
+        """send() without reply_to creates an OPEN card (tool progress /
+        commentary / streaming first chunk).  No flicker closed→streaming
+        when edit_message follows."""
+        a = adapter_with_card
+        result = await a.send("chat-1", "💻 terminal: ls")
+>       assert result.success
+E       assert False
+E        +  where False = SendResult(success=False, message_id=None, error="'<' not supported between instances of 'AsyncMock' and 'int'", raw_response=None, retryable=False).success
+
+tests/gateway/test_dingtalk.py:797: AssertionError
+------------------------------ Captured log call -------------------------------
+WARNING  gateway.platforms.dingtalk:dingtalk.py:1000 [Dingtalk] AI Card create failed: 'NoneType' object has no attribute 'RuntimeOptions'
+Traceback (most recent call last):
+  File "/Users/kato/.hermes/hermes-agent/gateway/platforms/dingtalk.py", line 914, in _create_and_stream_card
+    runtime = tea_util_models.RuntimeOptions()
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'NoneType' object has no attribute 'RuntimeOptions'
+
+WARNING  gateway.platforms.dingtalk:dingtalk.py:823 [Dingtalk] AI Card send failed, falling back to webhook
+ERROR    gateway.platforms.dingtalk:dingtalk.py:856 [Dingtalk] Send error: '<' not supported between instances of 'AsyncMock' and 'int'
+_________ TestCardLifecycle.test_done_fires_only_when_reply_to_is_set __________
+[gw4] darwin -- Python 3.11.14 /Users/kato/.hermes/hermes-agent/venv/bin/python
+
+self = <tests.gateway.test_dingtalk.TestCardLifecycle object at 0x1090a3050>
+adapter_with_card = <gateway.platforms.dingtalk.DingTalkAdapter object at 0x110ae3490>
+
+    @pytest.mark.asyncio
+    async def test_done_fires_only_when_reply_to_is_set(self, adapter_with_card):
+        """reply_to distinguishes final response (base.py) from tool-progress
+        sends (run.py).  Done must only fire for the former."""
+        a = adapter_with_card
+        fired: list[str] = []
+        a._fire_done_reaction = lambda cid: fired.append(cid)
+    
+        # Tool-progress / commentary path: no reply_to — no Done.
+        await a.send("chat-1", "tool line")
+        assert fired == []
+    
+        # Final response path: reply_to set — Done fires.
+        await a.send("chat-1", "final", reply_to="user-msg-1")
+>       assert fired == ["chat-1"]
+E       AssertionError: assert [] == ['chat-1']
+E         
+E         Right contains one more item: 'chat-1'
+E         Use -v to get more diff
+
+tests/gateway/test_dingtalk.py:817: AssertionError
+------------------------------ Captured log call -------------------------------
+WARNING  gateway.platforms.dingtalk:dingtalk.py:1000 [Dingtalk] AI Card create failed: 'NoneType' object has no attribute 'RuntimeOptions'
+Traceback (most recent call last):
+  File "/Users/kato/.hermes/hermes-agent/gateway/platforms/dingtalk.py", line 914, in _create_and_stream_card
+    runtime = tea_util_models.RuntimeOptions()
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'NoneType' object has no attribute 'RuntimeOptions'
+
+WARNING  gateway.platforms.dingtalk:dingtalk.py:823 [Dingtalk] AI Card send failed, falling back to webhook
+ERROR    gateway.platforms.dingtalk:dingtalk.py:856 [Dingtalk] Send error: '<' not supported between instances of 'AsyncMock' and 'int'
+WARNING  gateway.platforms.dingtalk:dingtalk.py:1000 [Dingtalk] AI Card create failed: 'NoneType' object has no attribute 'RuntimeOptions'
+Traceback (most recent call last):
+  File "/Users/kato/.hermes/hermes-agent/gateway/platforms/dingtalk.py", line 914, in _create_and_stream_card
+    runtime = tea_util_models.RuntimeOptions()
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'NoneType' object has no attribute 'RuntimeOptions'
+
+WARNING  gateway.platforms.dingtalk:dingtalk.py:823 [Dingtalk] AI Card send failed, falling back to webhook
+ERROR    gateway.platforms.dingtalk:dingtalk.py:856 [Dingtalk] Send error: '<' not supported between instances of 'AsyncMock' and 'int'
+___________ TestCardLifecycle.test_edit_message_finalize_fires_done ____________
+[gw4] darwin -- Python 3.11.14 /Users/kato/.hermes/hermes-agent/venv/bin/python
+
+self = <tests.gateway.test_dingtalk.TestCardLifecycle object at 0x1090a3410>
+adapter_with_card = <gateway.platforms.dingtalk.DingTalkAdapter object at 0x111f0b890>
+
+    @pytest.mark.asyncio
+    async def test_edit_message_finalize_fires_done(self, adapter_with_card):
+        """Stream consumer's final edit_message(finalize=True) fires Done."""
+        a = adapter_with_card
+        fired: list[str] = []
+        a._fire_done_reaction = lambda cid: fired.append(cid)
+    
+        await a.send("chat-1", "initial")
+        # Reopen via edit_message(finalize=False) then close.
+        await a.edit_message(
+            chat_id="chat-1", message_id="track-X",
+            content="streaming...", finalize=False,
+        )
+        await a.edit_message(
+            chat_id="chat-1", message_id="track-X",
+            content="final", finalize=True,
+        )
+>       assert "chat-1" in fired
+E       AssertionError: assert 'chat-1' in []
+
+tests/gateway/test_dingtalk.py:836: AssertionError
+------------------------------ Captured log call -------------------------------
+WARNING  gateway.platforms.dingtalk:dingtalk.py:1000 [Dingtalk] AI Card create failed: 'NoneType' object has no attribute 'RuntimeOptions'
+Traceback (most recent call last):
+  File "/Users/kato/.hermes/hermes-agent/gateway/platforms/dingtalk.py", line 914, in _create_and_stream_card
+    runtime = tea_util_models.RuntimeOptions()
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'NoneType' object has no attribute 'RuntimeOptions'
+
+WARNING  gateway.platforms.dingtalk:dingtalk.py:823 [Dingtalk] AI Card send failed, falling back to webhook
+ERROR    gateway.platforms.dingtalk:dingtalk.py:856 [Dingtalk] Send error: '<' not supported between instances of 'AsyncMock' and 'int'
+WARNING  gateway.platforms.dingtalk:dingtalk.py:1050 [Dingtalk] Card edit failed: 'NoneType' object has no attribute 'StreamingUpdateRequest'
+WARNING  gateway.platforms.dingtalk:dingtalk.py:1050 [Dingtalk] Card edit failed: 'NoneType' object has no attribute 'StreamingUpdateRequest'
+______ TestCardLifecycle.test_edit_message_finalize_false_tracks_sibling _______
+[gw4] darwin -- Python 3.11.14 /Users/kato/.hermes/hermes-agent/venv/bin/python
+
+self = <tests.gateway.test_dingtalk.TestCardLifecycle object at 0x1090a0d90>
+adapter_with_card = <gateway.platforms.dingtalk.DingTalkAdapter object at 0x111e64990>
+
+    @pytest.mark.asyncio
+    async def test_edit_message_finalize_false_tracks_sibling(self, adapter_with_card):
+        """After edit_message(finalize=False), card is tracked as open."""
+        a = adapter_with_card
+        await a.edit_message(
+            chat_id="chat-1", message_id="track-1",
+            content="partial", finalize=False,
+        )
+>       assert "chat-1" in a._streaming_cards
+E       AssertionError: assert 'chat-1' in {}
+E        +  where {} = <gateway.platforms.dingtalk.DingTalkAdapter object at 0x111e64990>._streaming_cards
+
+tests/gateway/test_dingtalk.py:846: AssertionError
+------------------------------ Captured log call -------------------------------
+WARNING  gateway.platforms.dingtalk:dingtalk.py:1050 [Dingtalk] Card edit failed: 'NoneType' object has no attribute 'StreamingUpdateRequest'
+_____ TestCardLifecycle.test_next_send_auto_closes_sibling_streaming_cards _____
+[gw4] darwin -- Python 3.11.14 /Users/kato/.hermes/hermes-agent/venv/bin/python
+
+self = <tests.gateway.test_dingtalk.TestCardLifecycle object at 0x1090b0710>
+adapter_with_card = <gateway.platforms.dingtalk.DingTalkAdapter object at 0x110e21f50>
+
+    @pytest.mark.asyncio
+    async def test_next_send_auto_closes_sibling_streaming_cards(
+        self, adapter_with_card,
+    ):
+        """Tool-progress card left open (send without reply_to + edits) must
+        be auto-closed when the final-reply send arrives."""
+        a = adapter_with_card
+        # First tool: intermediate send — card stays open.
+        r1 = await a.send("chat-1", "💻 tool1")
+        # Second tool: edit_message(finalize=False) — keeps streaming.
+        await a.edit_message(
+            chat_id="chat-1", message_id=r1.message_id,
+            content="💻 tool1\n💻 tool2", finalize=False,
+        )
+>       assert r1.message_id in a._streaming_cards.get("chat-1", {})
+E       assert None in {}
+E        +  where None = SendResult(success=False, message_id=None, error="'<' not supported between instances of 'AsyncMock' and 'int'", raw_response=None, retryable=False).message_id
+E        +  and   {} = <built-in method get of dict object at 0x111ce30c0>('chat-1', {})
+E        +    where <built-in method get of dict object at 0x111ce30c0> = {}.get
+E        +      where {} = <gateway.platforms.dingtalk.DingTalkAdapter object at 0x110e21f50>._streaming_cards
+
+tests/gateway/test_dingtalk.py:863: AssertionError
+------------------------------ Captured log call -------------------------------
+WARNING  gateway.platforms.dingtalk:dingtalk.py:1000 [Dingtalk] AI Card create failed: 'NoneType' object has no attribute 'RuntimeOptions'
+Traceback (most recent call last):
+  File "/Users/kato/.hermes/hermes-agent/gateway/platforms/dingtalk.py", line 914, in _create_and_stream_card
+    runtime = tea_util_models.RuntimeOptions()
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'NoneType' object has no attribute 'RuntimeOptions'
+
+WARNING  gateway.platforms.dingtalk:dingtalk.py:823 [Dingtalk] AI Card send failed, falling back to webhook
+ERROR    gateway.platforms.dingtalk:dingtalk.py:856 [Dingtalk] Send error: '<' not supported between instances of 'AsyncMock' and 'int'
+________________ test_auto_thread_creates_thread_and_redirects _________________
+[gw5] darwin -- Python 3.11.14 /Users/kato/.hermes/hermes-agent/venv/bin/python
+
+adapter = <gateway.platforms.discord.DiscordAdapter object at 0x115f7f310>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x115f7f490>
+
+    @pytest.mark.asyncio
+    async def test_auto_thread_creates_thread_and_redirects(adapter, monkeypatch):
+        """When DISCORD_AUTO_THREAD=true, a new thread is created and the event routes there."""
+        monkeypatch.setenv("DISCORD_AUTO_THREAD", "true")
+        monkeypatch.setenv("DISCORD_REQUIRE_MENTION", "false")
+    
+        thread = SimpleNamespace(id=999, name="Hello")
+        adapter._auto_create_thread = AsyncMock(return_value=thread)
+    
+        captured_events = []
+    
+        async def capture_handle(event):
+            captured_events.append(event)
+    
+        adapter.handle_message = capture_handle
+    
+        msg = _fake_message(_FakeTextChannel(), content="Hello world")
+    
+        await adapter._handle_message(msg)
+    
+        adapter._auto_create_thread.assert_awaited_once_with(msg)
+        assert len(captured_events) == 1
+        event = captured_events[0]
+>       assert event.source.chat_id == "999"  # redirected to thread
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AssertionError: assert '100' == '999'
+E         
+E         - 999
+E         + 100
+
+tests/gateway/test_discord_slash_commands.py:578: AssertionError
+_______ TestDingTalkAdapterAICards.test_send_uses_ai_card_if_configured ________
+[gw4] darwin -- Python 3.11.14 /Users/kato/.hermes/hermes-agent/venv/bin/python
+
+self = <tests.gateway.test_dingtalk.TestDingTalkAdapterAICards object at 0x1090b1f50>
+config = PlatformConfig(enabled=True, token=None, api_key=None, home_channel=None, reply_to_mode='first', extra={'client_id': 'test_id', 'client_secret': 'test_secret', 'card_template_id': 'test_card_template'})
+mock_stream_client = <MagicMock id='4581244048'>
+mock_http_client = <AsyncMock id='4581236240'>
+mock_message = <MagicMock id='4576541200'>
+
+    @pytest.mark.asyncio
+    async def test_send_uses_ai_card_if_configured(self, config, mock_stream_client, mock_http_client, mock_message):
+        from gateway.platforms.dingtalk import DingTalkAdapter
+    
+        adapter = DingTalkAdapter(config)
+        adapter._stream_client = mock_stream_client
+        adapter._http_client = mock_http_client
+        adapter._message_contexts["test_conv_id"] = mock_message
+        adapter._session_webhooks = {"test_conv_id": ("https://api.dingtalk.com/robot/sendBySession?session=test", 9999999999999)}
+        adapter._card_template_id = "test_card_template"
+    
+        # Mock the card SDK with proper async methods
+        mock_card_sdk = MagicMock()
+        mock_card_sdk.create_card_with_options_async = AsyncMock()
+        mock_card_sdk.deliver_card_with_options_async = AsyncMock()
+        mock_card_sdk.streaming_update_with_options_async = AsyncMock()
+        adapter._card_sdk = mock_card_sdk
+    
+        # Mock access token
+        adapter._get_access_token = AsyncMock(return_value="test_token")
+    
+        result = await adapter.send("test_conv_id", "Hello World")
+    
+>       mock_card_sdk.create_card_with_options_async.assert_called_once()
+
+tests/gateway/test_dingtalk.py:967: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <AsyncMock name='mock.create_card_with_options_async' id='4579817680'>
+
+    def assert_called_once(self):
+        """assert that the mock was called only once.
+        """
+        if not self.call_count == 1:
+            msg = ("Expected '%s' to have been called once. Called %s times.%s"
+                   % (self._mock_name or 'mock',
+                      self.call_count,
+                      self._calls_repr()))
+>           raise AssertionError(msg)
+E           AssertionError: Expected 'create_card_with_options_async' to have been called once. Called 0 times.
+
+../../.local/share/uv/python/cpython-3.11.14-macos-aarch64-none/lib/python3.11/unittest/mock.py:918: AssertionError
+------------------------------ Captured log call -------------------------------
+WARNING  gateway.platforms.dingtalk:dingtalk.py:1000 [Dingtalk] AI Card create failed: 'NoneType' object has no attribute 'RuntimeOptions'
+Traceback (most recent call last):
+  File "/Users/kato/.hermes/hermes-agent/gateway/platforms/dingtalk.py", line 914, in _create_and_stream_card
+    runtime = tea_util_models.RuntimeOptions()
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'NoneType' object has no attribute 'RuntimeOptions'
+
+WARNING  gateway.platforms.dingtalk:dingtalk.py:823 [Dingtalk] AI Card send failed, falling back to webhook
+ERROR    gateway.platforms.dingtalk:dingtalk.py:856 [Dingtalk] Send error: '<' not supported between instances of 'AsyncMock' and 'int'
+______________ test_auto_thread_enabled_by_default_slash_commands ______________
+[gw5] darwin -- Python 3.11.14 /Users/kato/.hermes/hermes-agent/venv/bin/python
+
+adapter = <gateway.platforms.discord.DiscordAdapter object at 0x115f9aed0>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x115f9b010>
+
+    @pytest.mark.asyncio
+    async def test_auto_thread_enabled_by_default_slash_commands(adapter, monkeypatch):
+        """Without DISCORD_AUTO_THREAD env var, auto-threading is enabled (default: true)."""
+        monkeypatch.delenv("DISCORD_AUTO_THREAD", raising=False)
+        monkeypatch.setenv("DISCORD_REQUIRE_MENTION", "false")
+    
+        fake_thread = _FakeThreadChannel(channel_id=999, name="auto-thread")
+        adapter._auto_create_thread = AsyncMock(return_value=fake_thread)
+    
+        captured_events = []
+    
+        async def capture_handle(event):
+            captured_events.append(event)
+    
+        adapter.handle_message = capture_handle
+    
+        msg = _fake_message(_FakeTextChannel())
+    
+        await adapter._handle_message(msg)
+    
+        adapter._auto_create_thread.assert_awaited_once()
+        assert len(captured_events) == 1
+>       assert captured_events[0].source.chat_id == "999"  # redirected to thread
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AssertionError: assert '100' == '999'
+E         
+E         - 999
+E         + 100
+
+tests/gateway/test_discord_slash_commands.py:605: AssertionError
+_____ TestMatrixUploadAndSend.test_upload_encrypted_room_uses_file_payload _____
+[gw7] darwin -- Python 3.11.14 /Users/kato/.hermes/hermes-agent/venv/bin/python
+
+self = <tests.gateway.test_matrix.TestMatrixUploadAndSend object at 0x10df85d10>
+
+    @pytest.mark.asyncio
+    async def test_upload_encrypted_room_uses_file_payload(self):
+        """Encrypted rooms should use 'file' key with crypto metadata."""
+        adapter = _make_adapter()
+        adapter._encryption = True
+        mock_client = MagicMock()
+        mock_client.crypto = object()
+        mock_client.state_store = MagicMock()
+        mock_client.state_store.is_encrypted = AsyncMock(return_value=True)
+        mock_client.upload_media = AsyncMock(return_value="mxc://example.org/enc")
+        mock_client.send_message_event = AsyncMock(return_value="$event")
+        adapter._client = mock_client
+    
+        result = await adapter._upload_and_send(
+            "!room:example.org", b"secret", "secret.txt", "text/plain", "m.file",
+        )
+    
+>       assert result.success is True
+E       assert False is True
+E        +  where False = SendResult(success=False, message_id=None, error="No module named 'mautrix'", raw_response=None, retryable=False).success
+
+tests/gateway/test_matrix.py:1244: AssertionError
+------------------------------ Captured log call -------------------------------
+ERROR    gateway.platforms.matrix:matrix.py:1011 Matrix: attachment encryption failed: No module named 'mautrix'
+______________ test_discord_forum_threads_are_handled_as_threads _______________
+[gw4] darwin -- Python 3.11.14 /Users/kato/.hermes/hermes-agent/venv/bin/python
+
+adapter = <gateway.platforms.discord.DiscordAdapter object at 0x1124f43d0>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x1124f4790>
+
+    @pytest.mark.asyncio
+    async def test_discord_forum_threads_are_handled_as_threads(adapter, monkeypatch):
+        monkeypatch.setenv("DISCORD_REQUIRE_MENTION", "false")
+        monkeypatch.delenv("DISCORD_FREE_RESPONSE_CHANNELS", raising=False)
+    
+        forum = FakeForumChannel(channel_id=222, name="support-forum")
+        thread = FakeThread(channel_id=456, name="Can Hermes reply here?", parent=forum)
+        message = make_message(channel=thread, content="hello from forum post")
+    
+        await adapter._handle_message(message)
+    
+        adapter.handle_message.assert_awaited_once()
+        event = adapter.handle_message.await_args.args[0]
+        assert event.text == "hello from forum post"
+>       assert event.source.chat_id == "456"
+E       AssertionError: assert '222' == '456'
+E         
+E         - 456
+E         + 222
+
+tests/gateway/test_discord_free_response.py:176: AssertionError
+_____ test_discord_forum_parent_in_free_response_list_allows_forum_thread ______
+[gw4] darwin -- Python 3.11.14 /Users/kato/.hermes/hermes-agent/venv/bin/python
+
+adapter = <gateway.platforms.discord.DiscordAdapter object at 0x112291250>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x112291410>
+
+    @pytest.mark.asyncio
+    async def test_discord_forum_parent_in_free_response_list_allows_forum_thread(adapter, monkeypatch):
+        monkeypatch.setenv("DISCORD_REQUIRE_MENTION", "true")
+        monkeypatch.setenv("DISCORD_FREE_RESPONSE_CHANNELS", "222")
+    
+        forum = FakeForumChannel(channel_id=222, name="support-forum")
+        thread = FakeThread(channel_id=333, name="Forum topic", parent=forum)
+        message = make_message(channel=thread, content="allowed from forum thread")
+    
+        await adapter._handle_message(message)
+    
+        adapter.handle_message.assert_awaited_once()
+        event = adapter.handle_message.await_args.args[0]
+        assert event.text == "allowed from forum thread"
+>       assert event.source.chat_id == "333"
+E       AssertionError: assert '222' == '333'
+E         
+E         - 333
+E         + 222
+
+tests/gateway/test_discord_free_response.py:237: AssertionError
+_________________________ test_reset_fires_reset_hook __________________________
+[gw4] darwin -- Python 3.11.14 /Users/kato/.hermes/hermes-agent/venv/bin/python
+
+mock_invoke_hook = <MagicMock name='invoke_hook' id='4599098256'>
+
+    @pytest.mark.asyncio
+    @patch("hermes_cli.plugins.invoke_hook")
+    async def test_reset_fires_reset_hook(mock_invoke_hook):
+        """/new must fire on_session_reset with the NEW session id."""
+        runner = _make_runner()
+    
+        await runner._handle_reset_command(_make_event("/new"))
+    
+>       mock_invoke_hook.assert_any_call(
+            "on_session_reset", session_id="sess-new", platform="telegram"
+        )
+
+tests/gateway/test_session_boundary_hooks.py:97: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <MagicMock name='invoke_hook' id='4599098256'>
+args = ('on_session_reset',)
+kwargs = {'platform': 'telegram', 'session_id': 'sess-new'}
+expected = call('on_session_reset', session_id='sess-new', platform='telegram')
+cause = None
+actual = [call('on_session_finalize', session_id='sess-old', platform='telegram'), call('on_session_reset', session_id='sess-old', platform='telegram')]
+expected_string = "invoke_hook('on_session_reset', session_id='sess-new', platform='telegram')"
+
+    def assert_any_call(self, /, *args, **kwargs):
+        """assert the mock has been called with the specified arguments.
+    
+        The assert passes if the mock has *ever* been called, unlike
+        `assert_called_with` and `assert_called_once_with` that only pass if
+        the call is the most recent one."""
+        expected = self._call_matcher(_Call((args, kwargs), two=True))
+        cause = expected if isinstance(expected, Exception) else None
+        actual = [self._call_matcher(c) for c in self.call_args_list]
+        if cause or expected not in _AnyComparer(actual):
+            expected_string = self._format_mock_call_signature(args, kwargs)
+>           raise AssertionError(
+                '%s call not found' % expected_string
+            ) from cause
+E           AssertionError: invoke_hook('on_session_reset', session_id='sess-new', platform='telegram') call not found
+
+../../.local/share/uv/python/cpython-3.11.14-macos-aarch64-none/lib/python3.11/unittest/mock.py:1010: AssertionError
+=============================== warnings summary ===============================
+venv/lib/python3.11/site-packages/lark_oapi/ws/client.py:67
+venv/lib/python3.11/site-packages/lark_oapi/ws/client.py:67
+venv/lib/python3.11/site-packages/lark_oapi/ws/client.py:67
+venv/lib/python3.11/site-packages/lark_oapi/ws/client.py:67
+venv/lib/python3.11/site-packages/lark_oapi/ws/client.py:67
+venv/lib/python3.11/site-packages/lark_oapi/ws/client.py:67
+venv/lib/python3.11/site-packages/lark_oapi/ws/client.py:67
+venv/lib/python3.11/site-packages/lark_oapi/ws/client.py:67
+  /Users/kato/.hermes/hermes-agent/venv/lib/python3.11/site-packages/lark_oapi/ws/client.py:67: DeprecationWarning: websockets.InvalidStatusCode is deprecated
+    def _parse_ws_conn_exception(e: websockets.InvalidStatusCode):
+
+venv/lib/python3.11/site-packages/websockets/legacy/__init__.py:6
+venv/lib/python3.11/site-packages/websockets/legacy/__init__.py:6
+venv/lib/python3.11/site-packages/websockets/legacy/__init__.py:6
+venv/lib/python3.11/site-packages/websockets/legacy/__init__.py:6
+venv/lib/python3.11/site-packages/websockets/legacy/__init__.py:6
+venv/lib/python3.11/site-packages/websockets/legacy/__init__.py:6
+venv/lib/python3.11/site-packages/websockets/legacy/__init__.py:6
+venv/lib/python3.11/site-packages/websockets/legacy/__init__.py:6
+  /Users/kato/.hermes/hermes-agent/venv/lib/python3.11/site-packages/websockets/legacy/__init__.py:6: DeprecationWarning: websockets.legacy is deprecated; see https://websockets.readthedocs.io/en/stable/howto/upgrade.html for upgrade instructions
+    warnings.warn(  # deprecated in 14.0 - 2024-11-09
+
+tests/gateway/test_api_server.py: 74 warnings
+  /Users/kato/.hermes/hermes-agent/tests/gateway/test_api_server.py:221: NotAppKeyWarning: It is recommended to use web.AppKey instances for keys.
+  https://docs.aiohttp.org/en/stable/web_advanced.html#application-s-config
+    app["api_server_adapter"] = adapter
+
+tests/gateway/test_api_server_bind_guard.py::TestConnectBindGuard::test_refuses_ipv4_wildcard_without_key
+tests/gateway/test_api_server_bind_guard.py::TestConnectBindGuard::test_refuses_ipv6_wildcard_without_key
+tests/gateway/test_weak_credential_guard.py::TestAPIServerPlaceholderKeyGuard::test_refuses_wildcard_with_placeholder_key
+tests/gateway/test_weak_credential_guard.py::TestAPIServerPlaceholderKeyGuard::test_refuses_wildcard_with_asterisk_key
+  /Users/kato/.hermes/hermes-agent/gateway/platforms/api_server.py:2315: NotAppKeyWarning: It is recommended to use web.AppKey instances for keys.
+  https://docs.aiohttp.org/en/stable/web_advanced.html#application-s-config
+    self._app["api_server_adapter"] = self
+
+tests/gateway/test_api_server_jobs.py: 35 warnings
+  /Users/kato/.hermes/hermes-agent/tests/gateway/test_api_server_jobs.py:52: NotAppKeyWarning: It is recommended to use web.AppKey instances for keys.
+  https://docs.aiohttp.org/en/stable/web_advanced.html#application-s-config
+    app["api_server_adapter"] = adapter
+
+tests/gateway/test_qqbot.py::TestDispatchPayload::test_op10_updates_heartbeat_interval
+  /Users/kato/.hermes/hermes-agent/gateway/platforms/qqbot/adapter.py:727: RuntimeWarning: coroutine 'QQAdapter._send_identify' was never awaited
+    self._create_task(self._send_identify())
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/gateway/test_slack.py::TestSendVideo::test_send_video_api_error_falls_back
+  /Users/kato/.local/share/uv/python/cpython-3.11.14-macos-aarch64-none/lib/python3.11/traceback.py:364: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    return next(itertools.islice(positions_gen, instruction_index // 2, None))
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/gateway/test_slack.py: 12 warnings
+  /Users/kato/.hermes/hermes-agent/gateway/platforms/slack.py:1176: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    user_name = await self._resolve_user_name(user_id, chat_id=channel_id)
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/gateway/test_sms.py::TestStartupGuard::test_insecure_flag_allows_start_without_url
+tests/gateway/test_sms.py::TestStartupGuard::test_insecure_flag_allows_start_without_url
+tests/gateway/test_sms.py::TestStartupGuard::test_webhook_url_allows_start
+tests/gateway/test_sms.py::TestStartupGuard::test_webhook_url_allows_start
+  /Users/kato/.hermes/hermes-agent/venv/lib/python3.11/site-packages/aiohttp/web_urldispatcher.py:208: DeprecationWarning: Bare functions are deprecated, use async ones
+    warnings.warn(
+
+tests/gateway/test_whatsapp_connect.py::TestFileHandleClosedOnError::test_closed_when_bridge_dies_phase1
+  /Users/kato/.local/share/uv/python/cpython-3.11.14-macos-aarch64-none/lib/python3.11/unittest/mock.py:2201: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    super().__init__(*args, **kwargs)
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/gateway/test_slack.py::TestAssistantThreadLifecycle::test_message_uses_cached_assistant_thread_identity
+  /Users/kato/.hermes/hermes-agent/venv/lib/python3.11/site-packages/_pytest/stash.py:108: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    del self._storage[key]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/gateway/test_dingtalk.py::TestCardLifecycle::test_final_reply_finalizes_card
+FAILED tests/gateway/test_dingtalk.py::TestCardLifecycle::test_intermediate_send_stays_streaming
+FAILED tests/gateway/test_dingtalk.py::TestCardLifecycle::test_done_fires_only_when_reply_to_is_set
+FAILED tests/gateway/test_dingtalk.py::TestCardLifecycle::test_edit_message_finalize_fires_done
+FAILED tests/gateway/test_dingtalk.py::TestCardLifecycle::test_edit_message_finalize_false_tracks_sibling
+FAILED tests/gateway/test_dingtalk.py::TestCardLifecycle::test_next_send_auto_closes_sibling_streaming_cards
+FAILED tests/gateway/test_discord_slash_commands.py::test_auto_thread_creates_thread_and_redirects
+FAILED tests/gateway/test_dingtalk.py::TestDingTalkAdapterAICards::test_send_uses_ai_card_if_configured
+FAILED tests/gateway/test_discord_slash_commands.py::test_auto_thread_enabled_by_default_slash_commands
+FAILED tests/gateway/test_matrix.py::TestMatrixUploadAndSend::test_upload_encrypted_room_uses_file_payload
+FAILED tests/gateway/test_discord_free_response.py::test_discord_forum_threads_are_handled_as_threads
+FAILED tests/gateway/test_discord_free_response.py::test_discord_forum_parent_in_free_response_list_allows_forum_thread
+FAILED tests/gateway/test_session_boundary_hooks.py::test_reset_fires_reset_hook
+========== 13 failed, 5029 passed, 2 skipped, 149 warnings in 56.51s ===========

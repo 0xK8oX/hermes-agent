@@ -89,108 +89,32 @@ def _get_scope_lock_path(scope: str, identity: str) -> Path:
 
 
 def _get_process_start_time(pid: int) -> Optional[int]:
-    """Return the process start time as a Unix epoch timestamp (seconds).
-    
-    Always returns epoch seconds regardless of platform.
-    Uses /proc on Linux (converts from clock ticks), falls back to ps on macOS/BSD.
-    """
-    # Try Linux /proc first
+    """Return the kernel start time for a process when available."""
     stat_path = Path(f"/proc/{pid}/stat")
-    if stat_path.exists():
-        try:
-            fields = stat_path.read_text().split()
-            ticks = int(fields[21])
-            # Convert kernel clock ticks to epoch seconds
-            clock_ticks_per_sec = os.sysconf("SC_CLK_TCK")
-            boot_time_ticks = 0
-            # Read boot time from /proc/stat (btime line)
-            try:
-                for line in Path("/proc/stat").read_text().splitlines():
-                    if line.startswith("btime"):
-                        boot_time_ticks = int(line.split()[1])
-                        break
-            except (OSError, IndexError, ValueError):
-                pass
-            seconds_since_boot = ticks / clock_ticks_per_sec
-            return int(boot_time_ticks + seconds_since_boot)
-        except (IndexError, PermissionError, ValueError, OSError, ZeroDivisionError):
-            pass
-    
-    # macOS/BSD fallback using ps
     try:
-        result = subprocess.run(
-            ["ps", "-o", "lstart=", "-p", str(pid)],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            from datetime import datetime
-            lstart_str = result.stdout.strip()
-            dt = datetime.strptime(lstart_str, "%a %b %d %H:%M:%S %Y")
-            return int(dt.timestamp())
-    except (subprocess.TimeoutExpired, ValueError, FileNotFoundError, OSError):
-        pass
-    
-    return None
+        # Field 22 in /proc/<pid>/stat is process start time (clock ticks).
+        return int(stat_path.read_text().split()[21])
+    except (FileNotFoundError, IndexError, PermissionError, ValueError, OSError):
+        return None
 
 
 def _read_process_cmdline(pid: int) -> Optional[str]:
-    """Return the process command line as a space-separated string.
-    
-    Uses /proc on Linux, falls back to ps on macOS/BSD.
-    """
-    # Try Linux /proc first
+    """Return the process command line as a space-separated string."""
     cmdline_path = Path(f"/proc/{pid}/cmdline")
-    if cmdline_path.exists():
-        try:
-            raw = cmdline_path.read_bytes()
-            if raw:
-                return raw.replace(b"\x00", b" ").decode("utf-8", errors="ignore").strip()
-        except (PermissionError, OSError):
-            pass
-    
-    # macOS/BSD fallback using ps
     try:
-        result = subprocess.run(
-            ["ps", "-o", "command=", "-p", str(pid)],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            return result.stdout.strip()
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-        pass
-    
-    return None
+        raw = cmdline_path.read_bytes()
+    except (FileNotFoundError, PermissionError, OSError):
+        return None
+
+    if not raw:
+        return None
+    return raw.replace(b"\x00", b" ").decode("utf-8", errors="ignore").strip()
 
 
 def _looks_like_gateway_process(pid: int) -> bool:
-    """Return True when the live PID still looks like the Hermes gateway.
-    
-    On macOS, /proc is unavailable so we rely on ps/pgrep commands.
-    """
+    """Return True when the live PID still looks like the Hermes gateway."""
     cmdline = _read_process_cmdline(pid)
     if not cmdline:
-        # Fallback: check if the specific PID is alive AND looks like gateway
-        try:
-            os.kill(pid, 0)  # Check if process exists
-        except (ProcessLookupError, PermissionError):
-            return False
-        # Try pgrep on macOS, but verify our target PID is in the results
-        try:
-            result = subprocess.run(
-                ["pgrep", "-f", "hermes_cli.main gateway"],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            if result.returncode == 0:
-                running_pids = {int(p.strip()) for p in result.stdout.split() if p.strip().isdigit()}
-                return pid in running_pids
-        except (subprocess.TimeoutExpired, FileNotFoundError, ValueError, OSError):
-            pass
         return False
 
     patterns = (

@@ -314,8 +314,19 @@ def _handle_send(args):
             try:
                 from gateway.extensions.cross_channel import dispatch_cross_channel
                 from gateway.session_context import get_session_env
+
+                # Security: log cross-channel dispatch for audit trail
                 source_key = get_session_env("HERMES_SESSION_KEY", "")
                 source_user = get_session_env("HERMES_SESSION_USER_NAME", "System")
+                source_personality = get_session_env("HERMES_PERSONALITY", "")
+                logger.info(
+                    "[CrossChannel] trigger_agent=True from personality='%s' "
+                    "session='%s' → %s/%s",
+                    source_personality,
+                    source_key[:40],
+                    platform_name,
+                    str(chat_id)[:40],
+                )
                 dispatch_result = dispatch_cross_channel(
                     platform=platform_name,
                     chat_id=chat_id,

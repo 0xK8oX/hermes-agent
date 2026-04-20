@@ -392,6 +392,15 @@ class SessionDB:
         self._execute_write(_do)
         return session_id
 
+    def update_session_personality(self, session_id: str, personality: str) -> None:
+        """Update the personality field for an existing session."""
+        def _do(conn):
+            conn.execute(
+                "UPDATE sessions SET personality = ? WHERE id = ?",
+                (personality, session_id),
+            )
+        self._execute_write(_do)
+
     def end_session(self, session_id: str, end_reason: str) -> None:
         """Mark a session as ended.
 
@@ -777,6 +786,7 @@ class SessionDB:
         offset: int = 0,
         include_children: bool = False,
         project_compression_tips: bool = True,
+        personality: str = None,
     ) -> List[Dict[str, Any]]:
         """List sessions with preview (first user message) and last active timestamp.
 
@@ -810,6 +820,9 @@ class SessionDB:
             placeholders = ",".join("?" for _ in exclude_sources)
             where_clauses.append(f"s.source NOT IN ({placeholders})")
             params.extend(exclude_sources)
+        if personality:
+            where_clauses.append("s.personality = ?")
+            params.append(personality)
 
         where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
         query = f"""
@@ -1238,6 +1251,9 @@ class SessionDB:
             if role_filter:
                 like_where.append(f"m.role IN ({','.join('?' for _ in role_filter)})")
                 like_params.extend(role_filter)
+            if personality_filter:
+                like_where.append("s.personality = ?")
+                like_params.append(personality_filter)
             like_sql = f"""
                 SELECT m.id, m.session_id, m.role,
                        substr(m.content,

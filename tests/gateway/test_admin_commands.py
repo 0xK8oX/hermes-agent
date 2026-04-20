@@ -95,20 +95,20 @@ def _make_runner(platform: Platform):
 class TestIsAdminUser:
     """Tests for GatewayRunner._is_admin_user()."""
 
-    def test_no_admin_list_configured_all_users_are_admins(self, monkeypatch):
-        """When GATEWAY_ADMIN_USERS is not set, all users are admins."""
+    def test_no_admin_list_configured_no_one_is_admin(self, monkeypatch):
+        """When GATEWAY_ADMIN_USERS is not set, no one is admin (fail-closed)."""
         _clear_auth_env(monkeypatch)
         runner = _make_runner(Platform.TELEGRAM)
         source = _make_source(Platform.TELEGRAM, "12345")
-        assert runner._is_admin_user(source) is True
+        assert runner._is_admin_user(source) is False
 
-    def test_empty_admin_list_all_users_are_admins(self, monkeypatch):
-        """When GATEWAY_ADMIN_USERS is empty string, all users are admins."""
+    def test_empty_admin_list_no_one_is_admin(self, monkeypatch):
+        """When GATEWAY_ADMIN_USERS is empty string, no one is admin (fail-closed)."""
         _clear_auth_env(monkeypatch)
         monkeypatch.setenv("GATEWAY_ADMIN_USERS", "")
         runner = _make_runner(Platform.TELEGRAM)
         source = _make_source(Platform.TELEGRAM, "12345")
-        assert runner._is_admin_user(source) is True
+        assert runner._is_admin_user(source) is False
 
     def test_admin_list_user_match(self, monkeypatch):
         """User ID in GATEWAY_ADMIN_USERS is recognized as admin."""
@@ -227,8 +227,8 @@ class TestAdminCommandGuard:
         assert "admin-only" not in (result or "").lower()
 
     @pytest.mark.asyncio
-    async def test_no_admin_config_all_commands_allowed(self, monkeypatch):
-        """Without GATEWAY_ADMIN_USERS set, all users can run /bind."""
+    async def test_no_admin_config_admin_commands_denied(self, monkeypatch):
+        """Without GATEWAY_ADMIN_USERS set, admin commands are denied (fail-closed)."""
         _clear_auth_env(monkeypatch)
         monkeypatch.setenv("WHATSAPP_ALLOW_ALL_USERS", "true")
 
@@ -236,7 +236,7 @@ class TestAdminCommandGuard:
         event = _make_event("/bind dev", Platform.WHATSAPP, "anyone", "group1")
 
         result = await runner._handle_message(event)
-        assert "admin-only" not in (result or "").lower()
+        assert "admin-only" in (result or "").lower()
 
     @pytest.mark.asyncio
     async def test_all_admin_commands_protected(self, monkeypatch):

@@ -498,16 +498,52 @@ def _platform_config_key(platform: "Platform") -> str:
 
 
 def _load_gateway_config() -> dict:
-    """Load and parse ~/.hermes/config.yaml, returning {} on any error."""
+    """Load and parse ~/.hermes/config.yaml, returning {} on any error.
+    
+    Environment variable references (``${VAR_NAME}``) in string values
+    are expanded via :func:`os.path.expandvars` so that sensitive keys
+    can be kept in ``~/.hermes/.env`` instead of the yaml file.
+    """
     try:
         config_path = _hermes_home / 'config.yaml'
         if config_path.exists():
             import yaml
             with open(config_path, 'r', encoding='utf-8') as f:
-                return yaml.safe_load(f) or {}
+                cfg = yaml.safe_load(f) or {}
+            # Recursively expand ${ENV_VAR} in all string values
+            _expand_env_vars(cfg)
+            return cfg
     except Exception:
         logger.debug("Could not load gateway config from %s", _hermes_home / 'config.yaml')
     return {}
+
+
+def _expand_env_vars(obj):
+    """Recursively expand ``${VAR}`` references in dict/list/string structures.
+    
+    Returns a new copy — the original config dict is NOT mutated, preventing
+    expanded API keys from leaking into logs or serialization.
+    """
+    import copy
+    result = copy.deepcopy(obj)
+    _expand_env_vars_inplace(result)
+    return result
+
+
+def _expand_env_vars_inplace(obj):
+    """Mutate obj in-place to expand ${VAR} references."""
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if isinstance(v, str):
+                obj[k] = os.path.expandvars(v)
+            else:
+                _expand_env_vars_inplace(v)
+    elif isinstance(obj, list):
+        for i, v in enumerate(obj):
+            if isinstance(v, str):
+                obj[i] = os.path.expandvars(v)
+            else:
+                _expand_env_vars_inplace(v)
 
 
 def _resolve_gateway_model(config: dict | None = None) -> str:
@@ -3124,16 +3160,20 @@ class GatewayRunner:
 
         Admin check logic:
         1. GATEWAY_ADMIN_USERS env var set → user must be in the list
-        2. GATEWAY_ADMIN_USERS not set → all authorized users are admins
-           (backward compatible: no behavior change if not configured)
+        2. GATEWAY_ADMIN_USERS not set → NO ONE is admin (fail-closed)
 
         Follows the same ID matching logic as _is_user_authorized
         (bare-ID extraction, WhatsApp alias expansion).
         """
         admin_list = os.getenv("GATEWAY_ADMIN_USERS", "").strip()
         if not admin_list:
-            # No admin list configured → everyone authorized is an admin
-            return True
+            # No admin list configured → deny admin commands (fail-closed)
+            logger.warning(
+                "[AdminCheck] GATEWAY_ADMIN_USERS not set — denying admin command "
+                "from user '%s'. Set GATEWAY_ADMIN_USERS to enable admin access.",
+                source.user_id,
+            )
+            return False
 
         user_id = source.user_id
         if not user_id:
@@ -4127,7 +4167,16 @@ class GatewayRunner:
         )
 
         # Get or create session
-        session_entry = self.session_store.get_or_create_session(source)
+        # Resolve personality (soul name) for session persistence
+        _ch_personality = None
+        try:
+            from gateway.extensions.channel_binding import _session_soul_names, _ensure_binding_loaded
+            _ensure_binding_loaded(session_key)
+            _ch_personality = _session_soul_names.get(session_key)
+        except Exception:
+            pass
+        
+        session_entry = self.session_store.get_or_create_session(source, personality=_ch_personality)
         session_key = session_entry.session_key
         
         # Emit session:start for new or auto-reset sessions

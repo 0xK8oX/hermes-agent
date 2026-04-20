@@ -620,15 +620,44 @@ def _get_memory_scope(session_key: str) -> Optional[str]:
 # Scoped memory resolution (used by MemoryStore via run_agent.py)
 # ---------------------------------------------------------------------------
 
+_known_soul_names_cache = None
+
+def _get_known_soul_names() -> Optional[set]:
+    """Return set of known soul names from ~/.hermes/souls/ directory."""
+    global _known_soul_names_cache
+    if _known_soul_names_cache is not None:
+        return _known_soul_names_cache
+    try:
+        from hermes_constants import get_hermes_home
+        souls_dir = get_hermes_home() / "souls"
+        if souls_dir.exists():
+            _known_soul_names_cache = {
+                p.stem for p in souls_dir.glob("*.md")
+            }
+            return _known_soul_names_cache
+    except Exception:
+        pass
+    return None
+
+
 def resolve_memory_dirs(scope: Optional[str]) -> List[Path]:
     """Resolve memory directories for a given scope.
 
     Returns a list of directories to read, in priority order:
-      - ``_global/`` always first (shared context), unless scope is ``-``
-      - Scoped directory (if scope is a named scope like "dev")
-      - ALL scope directories (if scope is "*")
 
-    When scope is ``-``, only reads the scoped directory and skips _global/.
+    ========  =============================================
+    scope     Directories returned
+    ========  =============================================
+    ``*``     ``_global/`` + ALL subdirectories
+    empty     ``_global/`` + base dir
+    ``None``  ``_global/`` + base dir
+    shared    ``_global/`` + base dir
+    named     ONLY the named subdirectory, NO ``_global/``
+    ``-``     ``_isolated/`` (empty dir, no memory)
+    ========  =============================================
+
+    Named scopes (e.g. ``lenx``, ``alpha``) intentionally exclude
+    ``_global/`` so their memory context stays isolated.
 
     This function is the public API used by run_agent.py to pass
     memory directories to MemoryStore.
@@ -640,45 +669,65 @@ def resolve_memory_dirs(scope: Optional[str]) -> List[Path]:
         base = Path.home() / ".hermes" / "memories"
     dirs: List[Path] = []
 
-    # _global/ is included unless scope is "-" (skip global)
-    if scope != "-":
-        global_dir = base / "_global"
-        if global_dir.exists():
-            dirs.append(global_dir)
-
+    # --- Isolation mode ---
     if scope == "-":
-        # Isolation mode — skip _global/ entirely.
-        # Return a dedicated isolation dir to avoid reading unscoped files
-        # from the base memories directory.  MemoryStore requires at least one dir.
         isolation_dir = base / "_isolated"
         isolation_dir.mkdir(parents=True, exist_ok=True)
         return [isolation_dir]
 
-    if not scope or not scope.strip():
-        # No scope (or whitespace-only) — read from base dir (backward compatible)
-        return dirs if dirs else [base]
-
+    # --- Wildcard: _global + all subdirs ---
     if scope == "*":
-        # God mode — read all subdirectories except _global (already added)
+        global_dir = base / "_global"
+        if global_dir.exists():
+            dirs.append(global_dir)
         if base.exists():
             for child in sorted(base.iterdir()):
                 if child.is_dir() and child.name != "_global" and not child.name.startswith("."):
                     dirs.append(child)
-        return dirs
+        return dirs if dirs else [base]
 
-    # Named scope — read specific subdirectory
+    # --- Shared / empty / None: _global + base dir ---
+    if not scope or not scope.strip() or scope == "shared":
+        if not scope:
+            logger.warning(
+                "[MemoryScope] Soul has no memory_scope set — defaulting to 'shared'. "
+                "Add `memory_scope: shared` (or `memory_scope: <name>` for isolation) "
+                "to the soul frontmatter to suppress this warning."
+            )
+        global_dir = base / "_global"
+        if global_dir.exists():
+            dirs.append(global_dir)
+        return dirs if dirs else [base]
+
+    # --- Named scope: ONLY the named dir, NO _global/ ---
     # Validate against path traversal and null bytes
     if "\x00" in scope or "/" in scope or "\\" in scope or ".." in scope:
         logger.error("Invalid memory scope (path traversal): %s", scope)
-        return dirs if dirs else [base]
+        return [base]
+
+    # Validate scope name matches a known soul
+    known_souls = _get_known_soul_names()
+    if known_souls is not None and scope not in known_souls:
+        logger.warning(
+            "[MemoryScope] Scope '%s' does not match any known soul. "
+            "Known: %s. Creating anyway for forward compatibility.",
+            scope, known_souls,
+        )
 
     scoped_dir = base / scope
     if scoped_dir.exists():
         dirs.append(scoped_dir)
     else:
-        # Auto-create on first access
-        scoped_dir.mkdir(parents=True, exist_ok=True)
-        dirs.append(scoped_dir)
+        # Auto-create on first access (only if scope looks valid)
+        if scope.isidentifier() or scope.replace("-", "_").isidentifier():
+            scoped_dir.mkdir(parents=True, exist_ok=True)
+            dirs.append(scoped_dir)
+        else:
+            logger.error(
+                "[MemoryScope] Refusing to create directory for invalid scope name '%s'",
+                scope,
+            )
+            return [base]
 
     return dirs
 
@@ -895,6 +944,9 @@ def _get_cron_binding(origin: dict) -> Optional[dict]:
         soul = _session_souls.get(key)
         if soul:
             result["soul_content"] = soul
+        soul_name = _session_soul_names.get(key)
+        if soul_name:
+            result["soul_name"] = soul_name
         skills = _session_skills.get(key)
         if skills is not None:
             result["skills"] = skills

@@ -763,6 +763,14 @@ class SessionStore:
                 if not reset_reason:
                     entry.updated_at = now
                     self._save()
+                    # Update personality in DB if changed (e.g. after gateway restart)
+                    if personality and self._db:
+                        try:
+                            existing = self._db.get_session(entry.session_id)
+                            if not existing or existing.get("personality") != personality:
+                                self._db.update_session_personality(entry.session_id, personality)
+                        except Exception:
+                            pass
                     return entry
                 else:
                     # Session is being auto-reset.

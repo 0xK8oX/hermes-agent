@@ -908,6 +908,7 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
             skip_context_files=True,  # Don't inject SOUL.md/AGENTS.md from scheduler cwd
             skip_memory=_cron_skip_memory,
             memory_scope=_cron_memory_scope,
+            personality=_cron_binding.get("soul_name") if _cron_binding else None,
             platform="cron",
             session_id=_cron_session_id,
             session_db=_session_db,
