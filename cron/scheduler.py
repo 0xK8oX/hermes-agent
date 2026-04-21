@@ -845,21 +845,6 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
             message = format_runtime_provider_error(exc)
             raise RuntimeError(message) from exc
 
-        from agent.smart_model_routing import resolve_turn_route
-        turn_route = resolve_turn_route(
-            prompt,
-            smart_routing,
-            {
-                "model": model,
-                "api_key": runtime.get("api_key"),
-                "base_url": runtime.get("base_url"),
-                "provider": runtime.get("provider"),
-                "api_mode": runtime.get("api_mode"),
-                "command": runtime.get("command"),
-                "args": list(runtime.get("args") or []),
-            },
-        )
-
         # --- Channel binding inheritance (consolidated) ---
         # If the cron job was created in a bound channel, inherit its
         # model/provider/api_key/soul/skills/memory so the job runs with
@@ -885,12 +870,12 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
         if _cron_overrides:
             # Model override (job-level model takes priority)
             if _cron_overrides.get("model") and not job.get("model"):
-                turn_route["model"] = _cron_overrides["model"]
+                model = _cron_overrides["model"]
                 logger.info(
                     "Job '%s': inherited bound model '%s' from %s/%s",
                     job_id, _cron_overrides["model"], origin.get("platform"), origin.get("chat_id"),
                 )
-            # Provider/api_key/base_url
+            # Provider/api_key/base_url — apply directly to runtime dict
             for _bk in ("provider", "api_key", "base_url"):
                 val = _cron_overrides.get(_bk)
                 if val:
@@ -900,7 +885,7 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
                             logger.warning("Job '%s': api_key env var not resolved", job_id)
                             continue
                         val = expanded
-                    turn_route["runtime"][_bk] = val
+                    runtime[_bk] = val
             # Soul content (with size guard)
             _MAX_SOUL_CHARS = 12_000
             if _cron_overrides.get("soul_content"):

@@ -357,23 +357,7 @@ class TestRunJobBindingInheritance:
                      "api_mode": "chat_completions",
                  },
              ), \
-             patch("agent.smart_model_routing.resolve_turn_route") as route_mock, \
              patch("run_agent.AIAgent") as mock_agent_cls:
-
-            # Return a pass-through turn_route so we can inspect what was set
-            def _make_route(prompt, smart, base):
-                return {
-                    "model": base.get("model", "default-model"),
-                    "runtime": {
-                        "api_key": base.get("api_key"),
-                        "base_url": base.get("base_url"),
-                        "provider": base.get("provider"),
-                        "api_mode": base.get("api_mode"),
-                        "command": base.get("command"),
-                        "args": base.get("args") or [],
-                    },
-                }
-            route_mock.side_effect = _make_route
 
             mock_agent = MagicMock()
             mock_agent.run_conversation.return_value = {"final_response": "ok"}

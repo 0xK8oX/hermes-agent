@@ -9281,7 +9281,9 @@ class GatewayRunner:
         if hasattr(self, "_busy_ack_ts"):
             self._busy_ack_ts.pop(session_key, None)
         # Clean up stale phase tracker to prevent memory leak
-        self._activity_phase_ts.pop(session_key, None)
+        _phase_ts = getattr(self, "_activity_phase_ts", None)
+        if _phase_ts is not None:
+            _phase_ts.pop(session_key, None)
 
     def _begin_session_run_generation(self, session_key: str) -> int:
         """Claim a fresh run generation token for ``session_key``.
@@ -9368,7 +9370,9 @@ class GatewayRunner:
             with _lock:
                 self._agent_cache.pop(session_key, None)
         # Clean up stale phase tracker to prevent memory leak
-        self._activity_phase_ts.pop(session_key, None)
+        _phase_ts = getattr(self, "_activity_phase_ts", None)
+        if _phase_ts is not None:
+            _phase_ts.pop(session_key, None)
 
     def _release_evicted_agent_soft(self, agent: Any) -> None:
         """Soft cleanup for cache-evicted agents — preserves session tool state.

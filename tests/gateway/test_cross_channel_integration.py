@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from gateway.config import GatewayConfig, Platform, PlatformConfig
+from gateway.extensions.cross_channel import reset_rate_limit
 from gateway.platforms.base import (
     BasePlatformAdapter,
     MessageEvent,
@@ -24,6 +25,15 @@ from gateway.platforms.base import (
     SessionSource,
 )
 from gateway.run import GatewayRunner
+
+
+# ---------------------------------------------------------------------------
+# Auto-reset rate limiter to avoid cross-test state leakage
+# ---------------------------------------------------------------------------
+@pytest.fixture(autouse=True)
+def _reset_cross_channel_rate_limit():
+    reset_rate_limit()
+    yield
 
 
 # ---------------------------------------------------------------------------
