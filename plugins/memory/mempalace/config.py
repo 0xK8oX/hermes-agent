@@ -93,6 +93,10 @@ class MemPalaceConfig:
         val = self._cfg.get("dedup_scope", _DEFAULTS["dedup_scope"])
         return val if val in ("wing", "room") else _DEFAULTS["dedup_scope"]
 
+    @property
+    def ollama_url(self) -> Optional[str]:
+        return self._cfg.get("ollama_url")
+
     # -- internal -------------------------------------------------------------
 
     def _load(self) -> None:

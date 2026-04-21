@@ -49,6 +49,9 @@ from plugins.memory.mempalace.config import MemPalaceConfig
 
 logger = logging.getLogger(__name__)
 
+# Module-level lock to prevent duplicate inserts from concurrent threads
+_dedup_lock = threading.Lock()
+
 
 class MemPalaceProvider(MemoryProvider):
     """MemPalace structured memory provider."""
@@ -599,7 +602,10 @@ class MemPalaceProvider(MemoryProvider):
             from chromadb.utils.embedding_functions import OllamaEmbeddingFunction
 
             ef = OllamaEmbeddingFunction(
-                url="http://localhost:11434",
+                url=os.environ.get("OLLAMA_HOST",
+                    (self._cfg.ollama_url if self._cfg else None) or
+                    "http://localhost:11434"
+                ),
                 model_name=self._cfg.embedding_model,
             )
 
@@ -670,50 +676,52 @@ class MemPalaceProvider(MemoryProvider):
                 return ("", "error")
 
             # --- Auto-dedup: search for similar content in same wing (any room) ---
-            replaced_id = None
-            try:
-                threshold = self._cfg.dedup_threshold if self._cfg else self._DEDUP_MAX_DISTANCE
-                scope = self._cfg.dedup_scope if self._cfg else "wing"
-                where_filter = {"wing": wing}
-                if scope == "room":
-                    where_filter = {"$and": [{"wing": wing}, {"room": room}]}
-                dup_result = col.query(
-                    query_texts=[content],
-                    n_results=1,
-                    where=where_filter,
-                    include=["documents", "metadatas", "distances"],
-                )
-                if (dup_result and dup_result.get("ids") and dup_result["ids"][0]
-                        and dup_result["distances"][0][0] < threshold):
-                    replaced_id = dup_result["ids"][0][0]
-                    logger.info(
-                        "MemPalace auto-dedup: replacing drawer %s (distance=%.4f)",
-                        replaced_id, dup_result["distances"][0][0],
+            # Serialize dedup-query + upsert to prevent duplicate race conditions
+            with _dedup_lock:
+                replaced_id = None
+                try:
+                    threshold = self._cfg.dedup_threshold if self._cfg else self._DEDUP_MAX_DISTANCE
+                    scope = self._cfg.dedup_scope if self._cfg else "wing"
+                    where_filter = {"wing": wing}
+                    if scope == "room":
+                        where_filter = {"$and": [{"wing": wing}, {"room": room}]}
+                    dup_result = col.query(
+                        query_texts=[content],
+                        n_results=1,
+                        where=where_filter,
+                        include=["documents", "metadatas", "distances"],
                     )
-            except Exception as e:
-                logger.debug("Auto-dedup search failed (will add new): %s", e)
+                    if (dup_result and dup_result.get("ids") and dup_result["ids"][0]
+                            and dup_result["distances"][0][0] < threshold):
+                        replaced_id = dup_result["ids"][0][0]
+                        logger.info(
+                            "MemPalace auto-dedup: replacing drawer %s (distance=%.4f)",
+                            replaced_id, dup_result["distances"][0][0],
+                        )
+                except Exception as e:
+                    logger.debug("Auto-dedup search failed (will add new): %s", e)
 
-            if replaced_id:
-                # Update existing drawer in place
-                drawer_id = replaced_id
-                action = "updated"
-            else:
-                drawer_id = hashlib.sha256(
-                    f"{content[:200]}:{time.time()}".encode()
-                ).hexdigest()[:16]
-                action = "added"
+                if replaced_id:
+                    # Update existing drawer in place
+                    drawer_id = replaced_id
+                    action = "updated"
+                else:
+                    drawer_id = hashlib.sha256(
+                        f"{content[:200]}:{time.time()}".encode()
+                    ).hexdigest()[:16]
+                    action = "added"
 
-            col.upsert(
-                ids=[drawer_id],
-                documents=[content],
-                metadatas=[{
-                    "wing": wing,
-                    "room": room,
-                    "importance": importance,
-                    "filed_at": datetime.now().isoformat(),
-                    "source": "hermes-agent",
-                }],
-            )
+                col.upsert(
+                    ids=[drawer_id],
+                    documents=[content],
+                    metadatas=[{
+                        "wing": wing,
+                        "room": room,
+                        "importance": importance,
+                        "filed_at": datetime.now().isoformat(),
+                        "source": "hermes-agent",
+                    }],
+                )
             return (drawer_id, action)
 
         except Exception as e:
@@ -750,8 +758,10 @@ class MemPalaceProvider(MemoryProvider):
             return self._wing  # Always enforce own wing, ignore LLM override
         if mode == 'all':
             return requested_wing  # Allow cross-wing queries (admin/wildcard)
-        # shared: default to _global, allow explicit override within shared scope
-        return requested_wing or self._wing
+        # shared: default to self._wing; only allow _global as an explicit override
+        if requested_wing and requested_wing != "_global":
+            logger.debug(f"Shared mode: ignoring requested_wing={requested_wing}, using {self._wing}")
+        return requested_wing if requested_wing == "_global" else self._wing
 
     def _tool_search(self, args: Dict[str, Any]) -> str:
         """Handle mempalace_search tool call."""
@@ -870,21 +880,23 @@ class MemPalaceProvider(MemoryProvider):
 
             # Wing ownership check: only delete from wings this session can access
             drawer_wing = meta.get("wing", "")
-            enforced_wing = self._enforce_wing(drawer_wing)  # what _enforce_wing resolves for this request
-            mode = self._wing_mode
-            if mode == 'isolated' and drawer_wing != enforced_wing:
-                return json.dumps({
-                    "error": f"Cannot delete drawer from wing '{drawer_wing}': "
-                             f"this session is isolated to wing '{enforced_wing}'",
-                    "success": False,
-                })
-            # shared mode: verify drawer belongs to a wing this session can access
-            if mode == 'shared' and enforced_wing != drawer_wing:
-                return json.dumps({
-                    "error": f"Cannot delete drawer from wing '{drawer_wing}': "
-                             f"this session can only access wing '{enforced_wing}'",
-                    "success": False,
-                })
+            if self._wing_mode == "shared":
+                # Shared mode: only allow delete from own wing or _global
+                if drawer_wing != self._wing and drawer_wing != "_global":
+                    return json.dumps({
+                        "error": f"Cannot delete from wing '{drawer_wing}' — only '{self._wing}' and '_global' allowed in shared mode",
+                        "success": False,
+                    })
+            elif self._wing_mode == "isolated":
+                # Isolated mode: strict wing enforcement
+                enforced_wing = self._enforce_wing(None)
+                if enforced_wing != drawer_wing:
+                    return json.dumps({
+                        "error": f"Cannot delete from wing '{drawer_wing}' — bound to '{enforced_wing}'",
+                        "success": False,
+                    })
+            # "all" and "disabled" modes: no wing restriction on delete
+            # (disabled is already guarded earlier — returns error before reaching here)
 
             # Delete
             col.delete(ids=[drawer_id])

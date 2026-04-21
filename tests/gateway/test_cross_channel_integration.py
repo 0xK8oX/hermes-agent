@@ -163,6 +163,9 @@ async def test_inject_unknown_platform():
 @pytest.mark.asyncio
 async def test_inject_no_adapter():
     """When adapter for a valid platform is missing, returns error."""
+    from gateway.extensions.cross_channel import reset_rate_limit
+    reset_rate_limit()
+
     runner, discord, _ = _make_runner_with_adapters()
     # Remove discord adapter to simulate missing connection
     runner.adapters = {}
@@ -243,12 +246,13 @@ async def test_cross_channel_to_telegram():
 @pytest.mark.asyncio
 async def test_multiple_cross_channel_dispatches():
     """Multiple rapid dispatches all reach the target adapter."""
-    from gateway.extensions.cross_channel import dispatch_cross_channel
+    from gateway.extensions.cross_channel import dispatch_cross_channel, reset_rate_limit
 
     runner, discord, _ = _make_runner_with_adapters()
 
     with patch("gateway.run.get_gateway_runner", return_value=runner):
         for i in range(5):
+            reset_rate_limit()  # Clear rate limit for rapid-fire test
             result = dispatch_cross_channel(
                 platform="discord",
                 chat_id="12345",
@@ -268,6 +272,8 @@ async def test_multiple_cross_channel_dispatches():
 @pytest.mark.asyncio
 async def test_dispatch_handles_adapter_exception():
     """If handle_message raises, inject_cross_channel_message returns error."""
+    from gateway.extensions.cross_channel import reset_rate_limit
+    reset_rate_limit()
     runner, discord, _ = _make_runner_with_adapters()
 
     # Make handle_message raise

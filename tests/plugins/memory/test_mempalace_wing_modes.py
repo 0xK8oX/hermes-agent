@@ -235,12 +235,13 @@ class TestToolSearchWingBehavior:
         assert where is None or where == {}
         p.shutdown()
 
-    def test_explicit_wing_arg_overrides(self, hermes_home):
-        """Explicit wing in args should override default scope."""
+    def test_explicit_wing_arg_overrides_in_isolated_mode(self, hermes_home):
+        """In isolated mode, explicit wing in args is IGNORED — own wing enforced."""
         p, fake_col = self._setup_with_fake_col(hermes_home, memory_scope="lenx")
         p._tool_search({"query": "unicorns", "wing": "dev"})
         assert len(fake_col.query_calls) == 1
-        assert fake_col.query_calls[0]["where"] == {"wing": "dev"}
+        # Isolated mode: LLM-supplied wing is ignored, own wing enforced
+        assert fake_col.query_calls[0]["where"] == {"wing": "lenx"}
         p.shutdown()
 
 

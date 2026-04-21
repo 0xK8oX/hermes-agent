@@ -48,6 +48,7 @@ import os
 import threading
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -66,6 +67,14 @@ _PURGE_OLDER_THAN_DAYS = 30
 # Gateway handles multiple platforms concurrently — without this,
 # concurrent hall_send / hall_read / hall_mark_read can corrupt the file.
 _hall_lock = threading.Lock()
+
+# Bounded thread pool for auto-dispatch (replaces unbounded daemon thread spawning)
+_dispatch_executor = ThreadPoolExecutor(max_workers=4)
+
+# Rate limiting: last dispatch timestamp per soul
+_last_dispatch_time: Dict[str, float] = {}
+_dispatch_rate_lock = threading.Lock()
+_DISPATCH_RATE_LIMIT_SECONDS = 2.0
 
 
 def _hall_path() -> Path:
@@ -156,27 +165,49 @@ def _is_admin_soul(soul_name: str) -> bool:
     """Check if a soul is bound to a channel owned by an admin user.
 
     Admin users are defined in GATEWAY_ADMIN_USERS env var (comma-separated user IDs).
-    A soul is considered 'admin' if any of its bound channels' user_id is an admin.
+    A soul is considered 'admin' if any of its bound channels' user_id is an admin,
+    OR if the soul name matches a known admin soul pattern (legacy fallback).
     """
     if not soul_name:
         return False
+
+    soul_lower = soul_name.lower().strip()
+
+    # Legacy fallback: well-known admin soul names
+    if soul_lower in ("alpha", "pm"):
+        return True
+
+    # Check GATEWAY_ADMIN_USERS env var
     admin_env = os.environ.get("GATEWAY_ADMIN_USERS", "").strip()
     if not admin_env:
         return False
-    admin_ids = {aid.strip() for aid in admin_env.split(",") if aid.strip()}
+
+    admin_ids = set(aid.strip() for aid in admin_env.split(",") if aid.strip())
     if not admin_ids:
         return False
 
-    # Check if the soul's channel has an admin binding
-    # For now: the *first* channel that matches this soul is checked
-    # In practice, alpha/pm/operation souls bound to admin-owned channels
+    # Check if the soul's bound channel has an admin user_id
     target = _lookup_soul_channel(soul_name)
     if not target:
         return False
-    # We trust that if a soul is bound, it's the owner's soul
-    # More precise: check config for user_id field, but for now
-    # we use a convention — alpha is always admin
-    return soul_name.lower().strip() in ("alpha", "pm")
+
+    # Try to find the user_id for the soul's binding from config
+    try:
+        from gateway.extensions.channel_binding import _get_all_platform_bindings
+        all_bindings = _get_all_platform_bindings()
+        for platform_name, bindings_list in all_bindings.items():
+            if not isinstance(bindings_list, list):
+                continue
+            for entry in bindings_list:
+                if (isinstance(entry, dict)
+                        and entry.get("soul", "").lower() == soul_lower):
+                    user_id = str(entry.get("user_id", "")).strip()
+                    if user_id and user_id in admin_ids:
+                        return True
+    except (ImportError, Exception):
+        pass
+
+    return False
 
 
 def _dispatch_dir() -> Path:
@@ -208,7 +239,8 @@ def _auto_dispatch(entry: dict) -> None:
       - "auto": Immediate dispatch — admin/command-initiated, target soul must respond.
       - "queued" (default): No dispatch — message waits for soul to read it.
 
-    Runs in a background thread to avoid blocking the caller.
+    Uses a bounded ThreadPoolExecutor to avoid unbounded thread spawning.
+    Rate-limited to at most one dispatch per soul per 2 seconds.
     If gateway runner is unavailable (subprocess), writes a pending file instead.
     """
     dispatch_mode = entry.get("dispatch", "queued")
@@ -224,6 +256,18 @@ def _auto_dispatch(entry: dict) -> None:
         logger.debug("[Hall] No bound channel found for soul '%s', skipping auto-dispatch", to_soul)
         return
 
+    # Rate limit: enforce minimum interval between dispatches per soul
+    now = time.monotonic()
+    with _dispatch_rate_lock:
+        last = _last_dispatch_time.get(to_soul, 0.0)
+        if now - last < _DISPATCH_RATE_LIMIT_SECONDS:
+            logger.info(
+                "[Hall] Rate-limited dispatch for soul '%s' (%.1fs since last)",
+                to_soul, now - last,
+            )
+            return
+        _last_dispatch_time[to_soul] = now
+
     # Fast path: check if we're in a subprocess first (synchronous — no thread needed)
     from gateway.run import get_gateway_runner
     runner = get_gateway_runner()
@@ -237,7 +281,6 @@ def _auto_dispatch(entry: dict) -> None:
 
     def _dispatch():
         try:
-            from gateway.extensions.cross_channel import dispatch_cross_channel
             logger.info(
                 "[Hall] Auto-dispatch: soul '%s' → %s:%s",
                 to_soul, target["platform"], target["chat_id"],
@@ -245,10 +288,9 @@ def _auto_dispatch(entry: dict) -> None:
             _execute_dispatch(entry, target)
 
         except Exception as e:
-            logger.debug("[Hall] Auto-dispatch error for soul '%s': %s", to_soul, e)
+            logger.warning("[Hall] Auto-dispatch error for soul '%s': %s", to_soul, e)
 
-    t = threading.Thread(target=_dispatch, name=f"hall-dispatch-{to_soul}", daemon=True)
-    t.start()
+    _dispatch_executor.submit(_dispatch)
 
 
 def _execute_dispatch(entry: dict, target: dict) -> None:
@@ -299,7 +341,7 @@ def hall_send(
     subject: str,
     body: str,
     priority: str = "normal",
-    dispatch: str = "auto",
+    dispatch: str = "queued",
 ) -> dict:
     """Post a message to the Hall.
 
@@ -310,8 +352,8 @@ def hall_send(
         body: message body
         priority: "normal" or "high"
         dispatch: "auto" (immediate — admin sends) or "queued" (system notification)
-            Default is "auto" — messages from admin souls auto-trigger the target.
-            System/batch callers should explicitly pass dispatch="queued".
+            Default is "queued" — caller must explicitly pass dispatch="auto"
+            to trigger immediate cross-channel dispatch.
 
     Returns:
         The created entry dict.
@@ -327,7 +369,7 @@ def hall_send(
         dispatch = "queued"
 
     entry = {
-        "id": uuid.uuid4().hex[:12],
+        "id": uuid.uuid4().hex[:16],
         "from": from_soul.lower().strip(),
         "to": to_soul.lower().strip(),
         "subject": subject.strip(),
@@ -371,22 +413,21 @@ def hall_read(soul: str, mark_read: bool = True) -> List[dict]:
     soul = soul.lower().strip()
     with _hall_lock:
         entries = _read_all_entries()
-    if not entries:
-        return []
+        if not entries:
+            return []
 
-    unread = []
-    modified = False
-    for entry in entries:
-        to_val = entry.get("to", "")
-        # Match if message is addressed to this soul, or "all"
-        if to_val in (soul, "all") and soul not in entry.get("read_by", []):
-            unread.append(entry)
-            if mark_read:
-                entry.setdefault("read_by", []).append(soul)
-                modified = True
+        unread = []
+        modified = False
+        for entry in entries:
+            to_val = entry.get("to", "")
+            # Match if message is addressed to this soul, or "all"
+            if to_val in (soul, "all") and soul not in entry.get("read_by", []):
+                unread.append(entry)
+                if mark_read:
+                    entry.setdefault("read_by", []).append(soul)
+                    modified = True
 
-    if modified:
-        with _hall_lock:
+        if modified:
             _write_all_entries(entries)
 
     return unread
@@ -428,16 +469,15 @@ def hall_mark_read(msg_id: str, soul: str) -> bool:
     soul = soul.lower().strip()
     with _hall_lock:
         entries = _read_all_entries()
-    found = False
-    for entry in entries:
-        if str(entry.get("id")) == str(msg_id):
-            if soul not in entry.get("read_by", []):
-                entry.setdefault("read_by", []).append(soul)
-                found = True
-            break
+        found = False
+        for entry in entries:
+            if str(entry.get("id")) == str(msg_id):
+                if soul not in entry.get("read_by", []):
+                    entry.setdefault("read_by", []).append(soul)
+                    found = True
+                break
 
-    if found:
-        with _hall_lock:
+        if found:
             _write_all_entries(entries)
     return found
 
@@ -454,32 +494,31 @@ def hall_clear(soul: str = None, older_than_days: int = _PURGE_OLDER_THAN_DAYS) 
     """
     with _hall_lock:
         entries = _read_all_entries()
-    if not entries:
-        return 0
+        if not entries:
+            return 0
 
-    cutoff = time.time() - (older_than_days * 86400)
-    original_count = len(entries)
+        cutoff = time.time() - (older_than_days * 86400)
+        original_count = len(entries)
 
-    filtered = []
-    for entry in entries:
-        # Parse ts
-        try:
-            ts_str = entry.get("ts", "")
-            ts_epoch = time.mktime(time.strptime(ts_str, "%Y-%m-%dT%H:%M:%S"))
-        except (ValueError, OverflowError):
-            ts_epoch = 0
+        filtered = []
+        for entry in entries:
+            # Parse ts
+            try:
+                ts_str = entry.get("ts", "")
+                ts_epoch = time.mktime(time.strptime(ts_str, "%Y-%m-%dT%H:%M:%S"))
+            except (ValueError, OverflowError):
+                ts_epoch = 0
 
-        is_old = ts_epoch < cutoff
-        is_target = (soul is None or entry.get("to") in (soul.lower(), "all"))
+            is_old = ts_epoch < cutoff
+            is_target = (soul is None or entry.get("to") in (soul.lower(), "all"))
 
-        if not (is_old and is_target):
-            filtered.append(entry)
+            if not (is_old and is_target):
+                filtered.append(entry)
 
-    removed = original_count - len(filtered)
-    if removed:
-        with _hall_lock:
+        removed = original_count - len(filtered)
+        if removed:
             _write_all_entries(filtered)
-        logger.info("[Hall] Purged %d old messages", removed)
+            logger.info("[Hall] Purged %d old messages", removed)
     return removed
 
 

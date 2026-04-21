@@ -32,10 +32,32 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
+import time
 from typing import Dict, Optional
 from gateway.platforms.base import MessageEvent, MessageType, SessionSource
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Recursion guard (C5) — thread-local dispatch depth counter
+# ---------------------------------------------------------------------------
+
+_tls = threading.local()
+
+# ---------------------------------------------------------------------------
+# Rate limiting (L6) — per-target minimum interval
+# ---------------------------------------------------------------------------
+
+_last_dispatch_time: Dict[tuple, float] = {}
+_rate_limit_lock = threading.Lock()
+_RATE_LIMIT_INTERVAL = 2.0  # seconds
+
+
+def reset_rate_limit():
+    """Clear rate-limit state — for use in tests."""
+    with _rate_limit_lock:
+        _last_dispatch_time.clear()
 
 
 async def inject_cross_channel_message(
@@ -46,14 +68,16 @@ async def inject_cross_channel_message(
     source_session_key: str = "",
     source_user_name: str = "System",
     thread_id: str = None,
+    source_platform: Optional[str] = None,
+    source_chat_id: Optional[str] = None,
 ) -> dict:
     """Inject a synthetic message into a target channel's agent pipeline.
 
     Used when ``trigger_agent=true`` in cross-channel dispatch.
     Creates a synthetic MessageEvent with ``internal=True`` (bypasses auth)
     and feeds it through the target channel's adapter into the full
-    message-processing pipeline — so the target agent processes it with
-    its own soul, model, and memory scope.
+    message-processing pipeline — so the target agent processes it with its
+    own soul, model, and memory scope.
 
     Args:
         adapters: Platform adapter dict from the gateway runner.
@@ -63,11 +87,50 @@ async def inject_cross_channel_message(
         source_session_key: The originating session key (for mirror-back).
         source_user_name: Display name for the synthetic event source.
         thread_id: Optional thread ID within the target channel.
+        source_platform: Originating platform (for auth check).
+        source_chat_id: Originating chat ID (for auth check).
 
     Returns:
         Dict with ``success`` and details, or ``error`` on failure.
     """
     from gateway.config import Platform
+
+    # ── C5: Recursion guard ──────────────────────────────────────────────
+    depth = getattr(_tls, "dispatch_depth", 0)
+    if depth >= 3:
+        logger.warning(
+            "[CrossChannel] Recursion depth %d >= 3 — breaking dispatch cycle "
+            "for %s:%s from %s",
+            depth, target_platform, target_chat_id, source_session_key,
+        )
+        return {"error": "Cross-channel dispatch recursion limit reached"}
+
+    # ── L6: Rate limiting ────────────────────────────────────────────────
+    target_key = (target_platform, str(target_chat_id))
+    now = time.monotonic()
+    with _rate_limit_lock:
+        last = _last_dispatch_time.get(target_key)
+        if last is not None and (now - last) < _RATE_LIMIT_INTERVAL:
+            remaining = round(_RATE_LIMIT_INTERVAL - (now - last), 1)
+            logger.warning(
+                "[CrossChannel] Rate limited: %.1fs remaining for %s:%s",
+                remaining, target_platform, target_chat_id,
+            )
+            return {"error": f"Rate limited — wait {remaining:.1f}s before dispatching to this channel again"}
+        _last_dispatch_time[target_key] = now
+
+    # ── H5: Soft authorization check ─────────────────────────────────────
+    if source_platform and source_chat_id:
+        try:
+            from gateway.extensions.channel_binding import is_channel_bound
+            if not is_channel_bound(source_platform, str(source_chat_id)):
+                logger.warning(
+                    "[CrossChannel] Source %s:%s has no bound soul — "
+                    "dispatch may be unauthorized (allowing for CLI/cron compat)",
+                    source_platform, source_chat_id,
+                )
+        except Exception:
+            logger.debug("[CrossChannel] Auth check failed, continuing", exc_info=True)
 
     # Resolve platform enum
     platform_map = {p.value: p for p in Platform}
@@ -102,10 +165,17 @@ async def inject_cross_channel_message(
         )
 
         logger.info(
-            "[CrossChannel] Injecting into %s:%s (thread=%s) from %s",
-            target_platform, target_chat_id, thread_id, source_session_key,
+            "[CrossChannel] Injecting into %s:%s (thread=%s) from %s (depth=%d)",
+            target_platform, target_chat_id, thread_id, source_session_key, depth,
         )
-        await adapter.handle_message(event)
+
+        # Increment recursion depth for nested dispatches
+        _tls.dispatch_depth = depth + 1
+        try:
+            await adapter.handle_message(event)
+        finally:
+            _tls.dispatch_depth = depth
+
         return {
             "success": True,
             "platform": target_platform,

@@ -28,6 +28,7 @@ Adding a new extension
 from __future__ import annotations
 
 import logging
+import threading
 from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -37,11 +38,13 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _HOOKS: Dict[str, List[Callable]] = {}
+_hooks_lock = threading.Lock()
 
 
 def register_hook(event: str, fn: Callable) -> None:
     """Register *fn* to be called when *event* fires."""
-    _HOOKS.setdefault(event, []).append(fn)
+    with _hooks_lock:
+        _HOOKS.setdefault(event, []).append(fn)
 
 
 def fire_hooks(event: str, *args: Any, **kwargs: Any) -> List[Any]:
@@ -50,8 +53,10 @@ def fire_hooks(event: str, *args: Any, **kwargs: Any) -> List[Any]:
     Exceptions are caught and logged per-callback so one broken extension
     cannot take down the gateway.
     """
+    with _hooks_lock:
+        hooks = list(_HOOKS.get(event, []))
     results: List[Any] = []
-    for fn in _HOOKS.get(event, []):
+    for fn in hooks:
         try:
             r = fn(*args, **kwargs)
             if r is not None:
@@ -63,7 +68,9 @@ def fire_hooks(event: str, *args: Any, **kwargs: Any) -> List[Any]:
 
 def fire_hooks_first(event: str, *args: Any, **kwargs: Any) -> Any:
     """Fire hooks and return the **first** non-None result, or None."""
-    for fn in _HOOKS.get(event, []):
+    with _hooks_lock:
+        hooks = list(_HOOKS.get(event, []))
+    for fn in hooks:
         try:
             r = fn(*args, **kwargs)
             if r is not None:
@@ -75,8 +82,9 @@ def fire_hooks_first(event: str, *args: Any, **kwargs: Any) -> Any:
 
 def list_hooks() -> Dict[str, List[str]]:
     """Return a summary of registered hooks (for diagnostics)."""
-    return {event: [getattr(fn, "__name__", str(fn)) for fn in fns]
-            for event, fns in _HOOKS.items()}
+    with _hooks_lock:
+        return {event: [getattr(fn, "__name__", str(fn)) for fn in fns]
+                for event, fns in _HOOKS.items()}
 
 
 # ---------------------------------------------------------------------------

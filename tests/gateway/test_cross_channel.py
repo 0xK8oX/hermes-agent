@@ -160,6 +160,10 @@ class TestDispatchCrossChannelHappyPath:
 # ---------------------------------------------------------------------------
 
 class TestInjectCrossChannelMessage:
+    def setup_method(self):
+        from gateway.extensions.cross_channel import reset_rate_limit
+        reset_rate_limit()
+
     def _make_real_runner(self):
         """Create a GatewayRunner via __new__ and minimal init."""
         from gateway.run import GatewayRunner

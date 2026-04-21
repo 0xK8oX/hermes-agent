@@ -229,14 +229,45 @@ def _on_new_session(session_key: str, event: Any) -> None:
     _apply_binding(session_key, binding)
 
 
-def _apply_binding(session_key: str, binding: dict) -> None:
-    """Store soul + skills + model + memory_scope from a resolved binding dict."""
+def _apply_binding(session_key: str, binding: dict, preloaded_soul: Optional[tuple] = None) -> None:
+    """Store soul + skills + model + memory_scope from a resolved binding dict.
+
+    Args:
+        session_key: The session key to apply the binding to.
+        binding: The binding configuration dict.
+        preloaded_soul: Optional (content, metadata) tuple pre-loaded from
+            disk to avoid file I/O while holding ``_state_lock`` (H4).
+    """
+    preloaded_meta = None
+
+    # Pre-load soul content from disk OUTSIDE the lock to avoid I/O under
+    # lock (H4).  Pass it into the locked section via _content key.
+    soul_name = binding.get("soul")
+    if soul_name and isinstance(soul_name, str) and "_content" not in binding:
+        if preloaded_soul is not None:
+            binding = dict(binding)  # shallow copy to avoid mutating caller
+            binding["_content"] = preloaded_soul[0] if preloaded_soul[0] else None
+            preloaded_meta = preloaded_soul[1] if len(preloaded_soul) > 1 else None
+        else:
+            loaded = _load_soul_with_meta(soul_name)
+            if loaded and loaded[0]:
+                binding = dict(binding)
+                binding["_content"] = loaded[0]
+                preloaded_meta = loaded[1]
+
     with _state_lock:
-        _apply_binding_unlocked(session_key, binding)
+        _apply_binding_unlocked(session_key, binding, preloaded_meta=preloaded_meta)
 
 
-def _apply_binding_unlocked(session_key: str, binding: dict) -> None:
-    """Internal: mutate session state (caller must hold _state_lock)."""
+def _apply_binding_unlocked(session_key: str, binding: dict, preloaded_meta: Optional[dict] = None) -> None:
+    """Internal: mutate session state (caller must hold _state_lock).
+
+    Args:
+        session_key: The session key to apply the binding to.
+        binding: The binding configuration dict.
+        preloaded_meta: Optional metadata dict pre-loaded from soul frontmatter
+            to avoid file I/O while holding ``_state_lock`` (H4).
+    """
     soul_name = binding.get("soul")
     model = binding.get("model")
 
@@ -324,14 +355,12 @@ def _apply_binding_unlocked(session_key: str, binding: dict) -> None:
             memory_scope, session_key[:30],
         )
 
-    # Parse allow_config_write from soul frontmatter
+    # Parse allow_config_write from soul frontmatter (use preloaded metadata
+    # to avoid I/O under lock — H4).  If not preloaded, skip the check —
+    # callers should ensure metadata is passed via _apply_binding's preloaded_soul.
     allow_config_write = False
-    if soul_name and isinstance(soul_name, str):
-        result = _load_soul_with_meta(soul_name)
-        if result:
-            _, meta = result
-            if isinstance(meta, dict):
-                allow_config_write = bool(meta.get("allow_config_write", False))
+    if soul_name and isinstance(soul_name, str) and isinstance(preloaded_meta, dict):
+        allow_config_write = bool(preloaded_meta.get("allow_config_write", False))
     _session_allow_config_write[session_key] = allow_config_write
     if allow_config_write:
         logger.info(
@@ -439,12 +468,14 @@ def _get_all_platform_bindings() -> Dict[str, list]:
     """Load channel_personality_bindings for all platforms from config.yaml.
 
     Returns {platform_name: [binding_dicts]}.
-    Result is cached on first call.
+    Result is cached on first call.  All reads and writes of
+    ``_CONFIG_BINDINGS_CACHE`` are protected by ``_state_lock``.
     """
     global _CONFIG_BINDINGS_CACHE
 
-    if _CONFIG_BINDINGS_CACHE is not None:
-        return _CONFIG_BINDINGS_CACHE
+    with _state_lock:
+        if _CONFIG_BINDINGS_CACHE is not None:
+            return _CONFIG_BINDINGS_CACHE
 
     import yaml
 
@@ -457,17 +488,20 @@ def _get_all_platform_bindings() -> Dict[str, list]:
     result: Dict[str, list] = {}
 
     if not config_path.exists():
-        _CONFIG_BINDINGS_CACHE = result
+        with _state_lock:
+            _CONFIG_BINDINGS_CACHE = result
         return result
 
     try:
         raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     except Exception:
-        _CONFIG_BINDINGS_CACHE = result
+        with _state_lock:
+            _CONFIG_BINDINGS_CACHE = result
         return result
 
     if not isinstance(raw, dict):
-        _CONFIG_BINDINGS_CACHE = result
+        with _state_lock:
+            _CONFIG_BINDINGS_CACHE = result
         return result
 
     # Scan top-level platform keys (discord, telegram, whatsapp, etc.)
@@ -496,7 +530,8 @@ def _get_all_platform_bindings() -> Dict[str, list]:
             if isinstance(bindings, list) and bindings:
                 result[platform_name] = bindings
 
-    _CONFIG_BINDINGS_CACHE = result
+    with _state_lock:
+        _CONFIG_BINDINGS_CACHE = result
     logger.debug("[ChannelBinding] Loaded bindings for platforms: %s", list(result.keys()))
     return result
 
@@ -508,7 +543,11 @@ def _on_session_reset(session_key: str) -> None:
     restores overrides, and invalidates config cache for hot-reload.
     """
     global _CONFIG_BINDINGS_CACHE
-    _CONFIG_BINDINGS_CACHE = None
+    with _state_lock:
+        _CONFIG_BINDINGS_CACHE = None
+
+    # L1: Invalidate soul name cache so new/removed souls are discovered
+    invalidate_soul_cache()
 
     with _state_lock:
         binding = _session_bindings.get(session_key)
@@ -621,6 +660,17 @@ def _get_memory_scope(session_key: str) -> Optional[str]:
 # ---------------------------------------------------------------------------
 
 _known_soul_names_cache = None
+
+
+def invalidate_soul_cache() -> None:
+    """Clear the cached set of known soul names.
+
+    Called from reload/reset hooks so that newly added or removed soul files
+    are picked up on next access.
+    """
+    global _known_soul_names_cache
+    _known_soul_names_cache = None
+
 
 def _get_known_soul_names() -> Optional[set]:
     """Return set of known soul names from ~/.hermes/souls/ directory."""
@@ -994,19 +1044,27 @@ def _parse_session_key(session_key: str) -> Optional[Dict[str, str]]:
 
     Session key format: ``agent:main:{platform}:{chat_type}:{chat_id}[:...]``
 
-    Returns dict with keys ``platform``, ``chat_type``, ``channel_id``,
+    Returns dict with keys ``platform``, ``chat_type``, ``channel_id``, and
+    optionally ``thread_id`` (for ``dm`` and ``thread`` chat types),
     or ``None`` if the key cannot be parsed.
+
+    Consistent with ``run.py:_parse_session_key`` — the 6th element is only
+    returned as ``thread_id`` for chat types where it is unambiguous (``dm``
+    and ``thread``).
     """
     if not session_key:
         return None
     parts = session_key.split(":")
     if len(parts) < 5 or parts[0] != "agent":
         return None
-    return {
+    result = {
         "platform": parts[2],
         "chat_type": parts[3],
         "channel_id": parts[4],
     }
+    if len(parts) > 5 and parts[3] in ("dm", "thread"):
+        result["thread_id"] = parts[5]
+    return result
 
 
 def _get_config_path() -> Path:
@@ -1086,7 +1144,8 @@ def _save_binding_to_config(platform: str, channel_id: str, binding: dict) -> st
 
     # Invalidate config cache so the new binding is picked up
     global _CONFIG_BINDINGS_CACHE
-    _CONFIG_BINDINGS_CACHE = None
+    with _state_lock:
+        _CONFIG_BINDINGS_CACHE = None
 
     action = "Updated" if replaced else "Saved"
     logger.info("[ChannelBinding] %s binding for %s:%s → %s", action, platform, channel_id, entry.get("soul"))
@@ -1134,7 +1193,8 @@ def _remove_binding_from_config(platform: str, channel_id: str) -> str | None:
 
     # Invalidate cache
     global _CONFIG_BINDINGS_CACHE
-    _CONFIG_BINDINGS_CACHE = None
+    with _state_lock:
+        _CONFIG_BINDINGS_CACHE = None
 
     logger.info("[ChannelBinding] Removed binding for %s:%s", platform, channel_id)
     return None  # success
