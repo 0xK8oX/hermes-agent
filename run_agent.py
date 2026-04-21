@@ -5237,8 +5237,13 @@ class AIAgent:
             # monitor knows we're alive while waiting for the response.
             if _poll_count % 100 == 0:  # 100 × 0.3s = 30s
                 _elapsed = time.time() - _call_start
+                # Include minute-resolution marker so the stale-phase
+                # detector sees a NEW phase on each heartbeat.  The
+                # `(Xs elapsed)` suffix is stripped by the detector's
+                # regex, but `[heartbeat ~Mm]` survives and increments.
+                _hb_mins = int(_elapsed // 60)
                 self._touch_activity(
-                    f"waiting for non-streaming response ({int(_elapsed)}s elapsed)"
+                    f"waiting for non-streaming response ({int(_elapsed)}s elapsed) [heartbeat ~{_hb_mins}m]"
                 )
 
             # Stale-call detector: kill the connection if no response
@@ -5990,8 +5995,14 @@ class AIAgent:
             if _hb_now - _last_heartbeat >= _HEARTBEAT_INTERVAL:
                 _last_heartbeat = _hb_now
                 _waiting_secs = int(_hb_now - last_chunk_time["t"])
+                # Include minute-resolution timestamp so the stale-phase
+                # detector sees a NEW phase on each heartbeat and doesn't
+                # falsely declare the agent stuck.  The `(Xs, no chunks)`
+                # suffix is stripped by the detector's regex, but the
+                # `[heartbeat ~Mm]` marker survives and increments.
+                _hb_mins = int((_hb_now - _call_start_time) // 60)
                 self._touch_activity(
-                    f"waiting for stream response ({_waiting_secs}s, no chunks yet)"
+                    f"waiting for stream response ({_waiting_secs}s, no chunks yet) [heartbeat ~{_hb_mins}m]"
                 )
 
             # Detect stale streams: connections kept alive by SSE pings
