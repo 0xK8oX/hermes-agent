@@ -9280,6 +9280,8 @@ class GatewayRunner:
         self._running_agents_ts.pop(session_key, None)
         if hasattr(self, "_busy_ack_ts"):
             self._busy_ack_ts.pop(session_key, None)
+        # Clean up stale phase tracker to prevent memory leak
+        self._activity_phase_ts.pop(session_key, None)
 
     def _begin_session_run_generation(self, session_key: str) -> int:
         """Claim a fresh run generation token for ``session_key``.
@@ -9365,6 +9367,8 @@ class GatewayRunner:
         if _lock:
             with _lock:
                 self._agent_cache.pop(session_key, None)
+        # Clean up stale phase tracker to prevent memory leak
+        self._activity_phase_ts.pop(session_key, None)
 
     def _release_evicted_agent_soft(self, agent: Any) -> None:
         """Soft cleanup for cache-evicted agents — preserves session tool state.
@@ -11139,6 +11143,9 @@ class GatewayRunner:
                     "history_offset": 0,
                     "failed": True,
                 }
+
+                # Clean up stale phase tracker to prevent memory leak
+                self._activity_phase_ts.pop(session_key, None)
 
             # Track fallback model state: if the agent switched to a
             # fallback model during this run, persist it so /model shows
