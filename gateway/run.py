@@ -206,6 +206,10 @@ if _config_path.exists():
                 os.environ["HERMES_AGENT_TIMEOUT"] = str(_agent_cfg["gateway_timeout"])
             if "gateway_timeout_warning" in _agent_cfg and "HERMES_AGENT_TIMEOUT_WARNING" not in os.environ:
                 os.environ["HERMES_AGENT_TIMEOUT_WARNING"] = str(_agent_cfg["gateway_timeout_warning"])
+            # Bridge gateway_timeout to stale_phase_timeout as well so the
+            # stuck-phase detector uses the same limit as the absolute timeout.
+            if "gateway_timeout" in _agent_cfg and "HERMES_GATEWAY_STALE_PHASE_TIMEOUT" not in os.environ:
+                os.environ["HERMES_GATEWAY_STALE_PHASE_TIMEOUT"] = str(_agent_cfg["gateway_timeout"])
             if "gateway_notify_interval" in _agent_cfg and "HERMES_AGENT_NOTIFY_INTERVAL" not in os.environ:
                 os.environ["HERMES_AGENT_NOTIFY_INTERVAL"] = str(_agent_cfg["gateway_notify_interval"])
             if "restart_drain_timeout" in _agent_cfg and "HERMES_RESTART_DRAIN_TIMEOUT" not in os.environ:
