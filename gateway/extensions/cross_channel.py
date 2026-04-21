@@ -158,10 +158,6 @@ async def inject_cross_channel_message(
             message_type=MessageType.TEXT,
             source=source,
             internal=True,  # Bypass user authorization
-            extra={
-                "cross_channel": True,
-                "source_session_key": source_session_key,
-            },
         )
 
         logger.info(

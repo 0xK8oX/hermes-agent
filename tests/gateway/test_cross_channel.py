@@ -204,8 +204,6 @@ class TestInjectCrossChannelMessage:
         assert event.source.chat_id == "123456789"
         assert event.source.user_name == "DevBot"
         assert event.source.user_id == "cross_channel"
-        assert event.extra.get("cross_channel") is True
-        assert event.extra.get("source_session_key") == "agent:main:discord:dev"
 
     def test_unknown_platform_returns_error(self):
         """inject_cross_channel_message returns error for unknown platform."""

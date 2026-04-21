@@ -860,7 +860,86 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
             },
         )
 
-        # --- Channel binding inheritance (will be consolidated in later commit) ---
+        # --- Channel binding inheritance (consolidated) ---
+        # If the cron job was created in a bound channel, inherit its
+        # model/provider/api_key/soul/skills/memory so the job runs with
+        # the same personality.  Uses get_session_overrides() for a single
+        # lock-acquisition pass instead of the old fire_hooks_first path.
+        _cron_overrides = None
+        if origin:
+            try:
+                from gateway.extensions.channel_binding import get_session_overrides
+                _platform = origin.get("platform", "")
+                _chat_id = str(origin.get("chat_id", ""))
+                _thread_id = origin.get("thread_id")
+                if _platform and _chat_id:
+                    _chat_type = "thread" if _thread_id else "group"
+                    _effective_id = str(_thread_id) if _thread_id else _chat_id
+                    _cron_sk = f"agent:main:{_platform}:{_chat_type}:{_effective_id}"
+                    if _thread_id:
+                        _cron_sk += f":{_thread_id}"
+                    _cron_overrides = get_session_overrides(_cron_sk)
+            except Exception:
+                logger.debug("Binding lookup failed for job '%s'", job_id, exc_info=True)
+
+        if _cron_overrides:
+            # Model override (job-level model takes priority)
+            if _cron_overrides.get("model") and not job.get("model"):
+                turn_route["model"] = _cron_overrides["model"]
+                logger.info(
+                    "Job '%s': inherited bound model '%s' from %s/%s",
+                    job_id, _cron_overrides["model"], origin.get("platform"), origin.get("chat_id"),
+                )
+            # Provider/api_key/base_url
+            for _bk in ("provider", "api_key", "base_url"):
+                val = _cron_overrides.get(_bk)
+                if val:
+                    if _bk == "api_key" and isinstance(val, str) and "${" in val:
+                        expanded = os.path.expandvars(val)
+                        if "${" in expanded:
+                            logger.warning("Job '%s': api_key env var not resolved", job_id)
+                            continue
+                        val = expanded
+                    turn_route["runtime"][_bk] = val
+            # Soul content (with size guard)
+            _MAX_SOUL_CHARS = 12_000
+            if _cron_overrides.get("soul_content"):
+                soul_text = _cron_overrides["soul_content"]
+                if len(soul_text) > _MAX_SOUL_CHARS:
+                    soul_text = soul_text[:_MAX_SOUL_CHARS] + "\n\n[...truncated]"
+                    logger.warning(
+                        "Job '%s': soul content truncated from %d to %d chars",
+                        job_id, len(_cron_overrides["soul_content"]), _MAX_SOUL_CHARS,
+                    )
+                prompt = soul_text + "\n\n---\n\n" + prompt
+                logger.info(
+                    "Job '%s': inherited bound soul content (%d chars) from %s/%s",
+                    job_id, len(soul_text), origin.get("platform"), origin.get("chat_id"),
+                )
+            # Skills inheritance — inject bound channel's skills if job has none
+            _binding_skills = _cron_overrides.get("skills")
+            if _binding_skills and not job.get("skills") and not job.get("skill"):
+                from tools.skills_tool import skill_view
+                skill_parts = []
+                for _skill_name in _binding_skills:
+                    _skill_name = str(_skill_name).strip()
+                    if not _skill_name:
+                        continue
+                    try:
+                        loaded = json.loads(skill_view(_skill_name))
+                        if loaded.get("content"):
+                            skill_parts.append(f"## Skill: {_skill_name}\n{loaded['content']}")
+                    except Exception:
+                        logger.debug("Job '%s': inherited skill '%s' not found, skipping", job_id, _skill_name)
+                if skill_parts:
+                    skills_text = "\n\n".join(skill_parts)
+                    prompt = skills_text + "\n\n---\n\n" + prompt
+                    logger.info(
+                        "Job '%s': inherited %d skills from bound channel %s/%s: %s",
+                        job_id, len(skill_parts), origin.get("platform"), origin.get("chat_id"),
+                        ", ".join(_binding_skills[:5]),
+                    )
+        # --- End channel binding inheritance ---
 
         fallback_model = _cfg.get("fallback_providers") or _cfg.get("fallback_model") or None
         credential_pool = None
@@ -884,7 +963,13 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
         # the cron agent so it can recall context from the bound channel's scope.
         _cron_memory_scope = None
         _cron_skip_memory = True  # Default: no memory (backward compatible)
-        # memory_scope will be added by later commit (channel binding consolidation)
+        if _cron_overrides and _cron_overrides.get("memory_scope"):
+            _cron_memory_scope = _cron_overrides["memory_scope"]
+            _cron_skip_memory = False  # Bound channel has a scope → enable memory
+            logger.info(
+                "Job '%s': inherited memory_scope '%s' from %s/%s",
+                job_id, _cron_memory_scope, origin.get("platform"), origin.get("chat_id"),
+            )
 
         agent = AIAgent(
             model=model,
@@ -908,7 +993,7 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
             skip_context_files=True,  # Don't inject SOUL.md/AGENTS.md from scheduler cwd
             skip_memory=_cron_skip_memory,
             memory_scope=_cron_memory_scope,
-            personality=_cron_binding.get("soul_name") if _cron_binding else None,
+            personality=_cron_overrides.get("soul_name") if _cron_overrides else None,
             platform="cron",
             session_id=_cron_session_id,
             session_db=_session_db,

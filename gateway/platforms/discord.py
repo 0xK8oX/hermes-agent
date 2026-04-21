@@ -2360,9 +2360,9 @@ class DiscordAdapter(BasePlatformAdapter):
         channel_id = str(interaction.channel_id)
         parent_id = str(getattr(getattr(interaction, "channel", None), "parent_id", "") or "")
         _personality = self._resolve_channel_personality_binding(channel_id, parent_id or None)
-        _extra = {}
         if _personality:
-            _extra["channel_binding"] = _personality
+            from gateway.extensions.channel_binding import set_event_binding
+            set_event_binding("discord", channel_id, _personality)
 
         return MessageEvent(
             text=text,
@@ -2370,7 +2370,6 @@ class DiscordAdapter(BasePlatformAdapter):
             source=source,
             raw_message=interaction,
             channel_prompt=self._resolve_channel_prompt(channel_id, parent_id or None),
-            extra=_extra,
         )
 
     # ------------------------------------------------------------------
@@ -2446,9 +2445,9 @@ class DiscordAdapter(BasePlatformAdapter):
         _skills = self._resolve_channel_skills(thread_id, _parent_id or None)
         _channel_prompt = self._resolve_channel_prompt(thread_id, _parent_id or None)
         _personality = self._resolve_channel_personality_binding(thread_id, _parent_id or None)
-        _extra = {}
         if _personality:
-            _extra["channel_binding"] = _personality
+            from gateway.extensions.channel_binding import set_event_binding
+            set_event_binding("discord", thread_id, _personality)
         event = MessageEvent(
             text=text,
             message_type=MessageType.TEXT,
@@ -2456,7 +2455,6 @@ class DiscordAdapter(BasePlatformAdapter):
             raw_message=interaction,
             auto_skill=_skills,
             channel_prompt=_channel_prompt,
-            extra=_extra,
         )
         await self.handle_message(event)
 
@@ -3249,9 +3247,9 @@ class DiscordAdapter(BasePlatformAdapter):
         _skills = self._resolve_channel_skills(_chan_id, _parent_id or None)
         _channel_prompt = self._resolve_channel_prompt(_chan_id, _parent_id or None)
         _personality = self._resolve_channel_personality_binding(_chan_id, _parent_id or None)
-        _extra = {}
         if _personality:
-            _extra["channel_binding"] = _personality
+            from gateway.extensions.channel_binding import set_event_binding
+            set_event_binding("discord", _chan_id, _personality)
 
         reply_to_id = None
         reply_to_text = None
@@ -3273,7 +3271,6 @@ class DiscordAdapter(BasePlatformAdapter):
             timestamp=message.created_at,
             auto_skill=_skills,
             channel_prompt=_channel_prompt,
-            extra=_extra,
         )
 
         # Track thread participation so the bot won't require @mention for

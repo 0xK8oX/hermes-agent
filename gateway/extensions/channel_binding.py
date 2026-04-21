@@ -43,7 +43,7 @@ Memory architecture:
     memory_scope omitted → default (unscoped, backward compatible)
 
 Resolution:
-    1. ``event.extra["channel_binding"]`` — set by adapter (Discord)
+    1. Side-channel ``set_event_binding()`` — called by adapter before event dispatch
     2. Session-key → config match — works for any platform, zero adapter changes
 
 This module registers itself via ``register_hook()`` on import.
@@ -94,6 +94,36 @@ _CONFIG_BINDINGS_CACHE: Optional[Dict[str, list]] = None
 
 # O(1) index for bound-channel lookup: {(platform, chat_id): True}
 _bound_channel_index: Dict[tuple, bool] = {}
+
+# ---------------------------------------------------------------------------
+# Side-channel for passing binding info from adapters to extensions.
+# Keyed by (platform, chat_id), value is binding dict.
+# This avoids modifying the MessageEvent dataclass (upstream code).
+# ---------------------------------------------------------------------------
+_event_binding_sidechannel: Dict[tuple, dict] = {}
+
+# Signal flag for /bind reset (set by extension, consumed by gateway wrapper).
+_bind_reset_flag: Dict[str, bool] = {}
+
+
+def set_event_binding(platform: str, chat_id: str, binding: dict) -> None:
+    """Store binding info for a specific (platform, chat_id) pair."""
+    _event_binding_sidechannel[(platform, str(chat_id))] = binding
+
+
+def get_event_binding(platform: str, chat_id: str) -> Optional[dict]:
+    """Retrieve and consume binding info for a (platform, chat_id) pair."""
+    return _event_binding_sidechannel.pop((platform, str(chat_id)), None)
+
+
+def set_bind_reset(channel_id: str) -> None:
+    """Signal that /bind needs a full session reset for the given channel."""
+    _bind_reset_flag[str(channel_id)] = True
+
+
+def consume_bind_reset(channel_id: str) -> bool:
+    """Check and consume the bind reset flag for the given channel."""
+    return _bind_reset_flag.pop(str(channel_id), False)
 
 
 # ---------------------------------------------------------------------------
@@ -194,7 +224,7 @@ def _on_new_session(session_key: str, event: Any) -> None:
     """Apply channel binding overrides for a new session.
 
     Resolution order:
-    1. ``event.extra["channel_binding"]`` — set by platform adapter (Discord)
+    1. Side-channel lookup by (platform, chat_id) — set by platform adapter
     2. Session-key → config match — works for any platform without adapter changes
 
     If a dynamic binding already exists (e.g. set via ``/bind`` and preserved
@@ -215,9 +245,10 @@ def _on_new_session(session_key: str, event: Any) -> None:
 
     binding = None
 
-    # Path 1: adapter-provided binding (Discord sets event.extra)
-    if hasattr(event, "extra") and isinstance(getattr(event, "extra", None), dict):
-        binding = event.extra.get("channel_binding")
+    # Path 1: adapter-provided binding via side-channel (set by Discord adapter)
+    parsed_sk = _parse_session_key(session_key)
+    if parsed_sk and parsed_sk.get("platform") and parsed_sk.get("channel_id"):
+        binding = get_event_binding(parsed_sk["platform"], parsed_sk["channel_id"])
 
     # Path 2: resolve from session_key + config (works for any platform)
     if not binding:
@@ -1019,6 +1050,77 @@ def _get_cron_binding(origin: dict) -> Optional[dict]:
 
 
 # ---------------------------------------------------------------------------
+# Consolidated session overrides (single lock acquisition)
+# ---------------------------------------------------------------------------
+
+def _get_session_overrides(session_key: str) -> Optional[dict]:
+    """Consolidated hook: gather ALL binding overrides in a single lock pass.
+
+    Calls ``_ensure_binding_loaded`` once, then reads all state dicts under
+    a single ``_state_lock`` acquisition — far cheaper than calling the five
+    individual hooks (each of which acquires the lock independently).
+
+    Returns a dict with any of these keys (only non-None values are included):
+
+    * ``model``, ``provider``, ``api_key``, ``base_url``, ``api_mode``
+    * ``soul_content``, ``soul_name``
+    * ``skills``
+    * ``memory_scope``
+    * ``personality`` — alias for ``soul_name`` (used by session_search isolation)
+
+    Returns ``None`` if no binding exists for *session_key*.
+    """
+    _ensure_binding_loaded(session_key)
+
+    result: Dict[str, Any] = {}
+
+    with _state_lock:
+        mo = _session_model_overrides.get(session_key)
+        if mo:
+            if mo.get("model"):
+                result["model"] = mo["model"]
+            if mo.get("provider"):
+                result["provider"] = mo["provider"]
+            raw_key = mo.get("api_key_raw")
+            if raw_key:
+                result["api_key"] = raw_key
+            elif mo.get("api_key"):
+                result["api_key"] = mo["api_key"]
+            if mo.get("base_url"):
+                result["base_url"] = mo["base_url"]
+            if mo.get("api_mode"):
+                result["api_mode"] = mo["api_mode"]
+
+        soul = _session_souls.get(session_key)
+        if soul:
+            result["soul_content"] = soul
+
+        soul_name = _session_soul_names.get(session_key)
+        if soul_name:
+            result["soul_name"] = soul_name
+            result["personality"] = soul_name  # alias for session_search isolation
+
+        skills = _session_skills.get(session_key)
+        if skills is not None:
+            result["skills"] = skills
+
+        mem = _session_memory_scopes.get(session_key)
+        if mem:
+            result["memory_scope"] = mem
+
+    return result if result else None
+
+
+def get_session_overrides(session_key: str) -> Optional[dict]:
+    """Public API: get all session overrides from channel binding.
+
+    External callers can import and call this directly, bypassing the hook
+    system entirely.
+    """
+    return _get_session_overrides(session_key)
+
+
+# ---------------------------------------------------------------------------
 # Register all hooks
 # ---------------------------------------------------------------------------
 
@@ -1030,6 +1132,7 @@ register_hook("get_ephemeral", _get_ephemeral)
 register_hook("get_skills_override", _get_skills_override)
 register_hook("get_memory_scope", _get_memory_scope)
 register_hook("get_cron_binding", _get_cron_binding)
+register_hook("get_session_overrides", _get_session_overrides)
 
 # Run startup validation
 _validate_bindings()
@@ -1298,9 +1401,8 @@ async def handle_bind_command(session_store, event) -> str:
             return error
 
         # Signal to the gateway wrapper that a full session reset is needed
-        if not hasattr(event, "extra") or event.extra is None:
-            event.extra = {}
-        event.extra["_bind_reset"] = True
+        # via the side-channel (avoids modifying MessageEvent).
+        set_bind_reset(channel_id)
 
         return (
             f"✅ Binding saved to config.yaml!\n"
@@ -1401,9 +1503,8 @@ async def handle_bind_command(session_store, event) -> str:
         # We cannot do this here because we don't have access to the gateway
         # instance — the gateway's _handle_bind_command wrapper will pick this
         # up and call _perform_session_reset().
-        if not hasattr(event, "extra") or event.extra is None:
-            event.extra = {}
-        event.extra["_bind_reset"] = True
+        # Uses side-channel instead of event.extra to avoid modifying MessageEvent.
+        set_bind_reset(channel_id)
 
         extras = []
         if binding.get("memory_scope"):

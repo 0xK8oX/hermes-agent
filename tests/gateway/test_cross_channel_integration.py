@@ -109,8 +109,6 @@ async def test_inject_creates_synthetic_event():
     assert event.source.chat_id == "1234567890"
     assert event.source.user_name == "DevAgent"
     assert event.source.user_id == "cross_channel"
-    assert event.extra.get("cross_channel") is True
-    assert event.extra.get("source_session_key") == "discord:111:222"
 
 
 @pytest.mark.asyncio

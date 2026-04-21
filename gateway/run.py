@@ -1140,8 +1140,9 @@ class GatewayRunner:
             )
             # Extension hook: channel binding model override as fallback
             from gateway.extensions import fire_hooks_first
-            _ch_override = fire_hooks_first("get_model_override", resolved_session_key) if resolved_session_key else None
-            if _ch_override:
+            _ch_overrides = fire_hooks_first("get_session_overrides", resolved_session_key) if resolved_session_key else None
+            _ch_override = _ch_overrides or {}
+            if _ch_override.get("model"):
                 _ch_model = _ch_override.get("model", model)
                 override_runtime = {
                     "provider": _ch_override.get("provider"),
@@ -4170,9 +4171,9 @@ class GatewayRunner:
         # Resolve personality (soul name) for session persistence
         _ch_personality = None
         try:
-            from gateway.extensions.channel_binding import _session_soul_names, _ensure_binding_loaded
-            _ensure_binding_loaded(session_key)
-            _ch_personality = _session_soul_names.get(session_key)
+            from gateway.extensions import fire_hooks_first
+            _overrides = fire_hooks_first("get_session_overrides", session_key) if session_key else None
+            _ch_personality = (_overrides or {}).get("personality")
         except Exception:
             pass
         
@@ -4701,7 +4702,6 @@ class GatewayRunner:
                 run_generation=run_generation,
                 event_message_id=event.message_id,
                 channel_prompt=event.channel_prompt,
-                event_extra=getattr(event, "extra", None),
             )
 
             # Stop persistent typing indicator now that the agent is done
@@ -6119,7 +6119,7 @@ class GatewayRunner:
         """Delegate to channel_binding extension's /bind handler.
 
         When /bind changes the soul (or /bind save persists), the handler
-        requests a full session reset via ``event.extra["_bind_reset"]``
+        signals a full session reset via the channel_binding side-channel
         so we perform the same cleanup as /new — evict cached agent, clear
         model overrides, flush memories, etc.
         """
@@ -6131,11 +6131,13 @@ class GatewayRunner:
         # access to the gateway instance (self).
         # Wrap in try/except so the user always sees the bind result,
         # even if cleanup fails (bind is already committed).
-        _has_reset = getattr(event, "extra", None) and event.extra.get("_bind_reset")
+        from gateway.extensions.channel_binding import consume_bind_reset
+        # Get channel_id from session key for reset signal lookup
+        _sk = self.session_store.get_or_create_session(event.source).session_key if event.source else ""
+        _chan_id = _sk.split(":")[4] if _sk and len(_sk.split(":")) > 4 else ""
+        _has_reset = consume_bind_reset(_chan_id)
 
         if _has_reset:
-            event.extra.pop("_bind_reset", None)
-
             try:
                 await self._perform_session_reset(event)
 
@@ -6968,14 +6970,16 @@ class GatewayRunner:
             self._service_tier = self._load_service_tier()
             turn_route = self._resolve_turn_agent_config(prompt, model, runtime_kwargs)
 
-            # Resolve memory scope from channel binding extension
+            # Resolve memory scope + soul content from channel binding extension
             _memory_scope = None
             _bg_soul_content = None
             try:
                 from gateway.extensions import fire_hooks_first
                 _bg_session_key = self._session_key_for_source(source)
-                _memory_scope = fire_hooks_first("get_memory_scope", _bg_session_key)
-                _bg_soul_content = fire_hooks_first("get_ephemeral", _bg_session_key)
+                _bg_overrides = fire_hooks_first("get_session_overrides", _bg_session_key) if _bg_session_key else None
+                if _bg_overrides:
+                    _memory_scope = _bg_overrides.get("memory_scope")
+                    _bg_soul_content = _bg_overrides.get("soul_content")
             except Exception:
                 pass
 
@@ -9817,7 +9821,6 @@ class GatewayRunner:
         _interrupt_depth: int = 0,
         event_message_id: Optional[str] = None,
         channel_prompt: Optional[str] = None,
-        event_extra: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Run the agent with the given message and context.
@@ -10199,18 +10202,11 @@ class GatewayRunner:
             if event_channel_prompt:
                 combined_ephemeral = (combined_ephemeral + "\n\n" + event_channel_prompt).strip()
 
-            # Extension hook: channel-bound soul replaces global ephemeral entirely
+            # Extension hook: consolidated session overrides (soul, memory scope, personality)
             from gateway.extensions import fire_hooks_first
-            _ch_ephemeral = fire_hooks_first("get_ephemeral", session_key)
-
-            # Resolve personality (soul name) for session_search isolation
-            _ch_personality = None
-            try:
-                from gateway.extensions.channel_binding import _session_soul_names, _ensure_binding_loaded
-                _ensure_binding_loaded(session_key)
-                _ch_personality = _session_soul_names.get(session_key)
-            except Exception:
-                pass
+            _ch_overrides = fire_hooks_first("get_session_overrides", session_key) if session_key else None
+            _ch_ephemeral = (_ch_overrides or {}).get("soul_content")
+            _ch_personality = (_ch_overrides or {}).get("personality")
 
             if _ch_ephemeral:
                 combined_ephemeral = (combined_ephemeral + "\n\n" + _ch_ephemeral).strip()
@@ -10338,20 +10334,7 @@ class GatewayRunner:
             turn_route = self._resolve_turn_agent_config(message, model, runtime_kwargs)
 
             # Resolve memory scope from channel binding extension
-            _persist_mem_scope = None
-            try:
-                from gateway.extensions import fire_hooks_first
-                _persist_mem_scope = fire_hooks_first("get_memory_scope", session_key)
-            except Exception:
-                pass
-            # Direct fallback: read from event_extra["channel_binding"] which
-            # the Discord adapter already resolves via parent_id.
-            # The hook-based resolution may fail for threads because the session
-            # key contains the thread ID, not the parent channel ID.
-            if not _persist_mem_scope:
-                _ev_binding = (event_extra or {}).get("channel_binding")
-                if _ev_binding and isinstance(_ev_binding, dict):
-                    _persist_mem_scope = _ev_binding.get("memory_scope")
+            _persist_mem_scope = (_ch_overrides or {}).get("memory_scope")
 
             # Check agent cache — reuse the AIAgent from the previous message
             # in this session to preserve the frozen system prompt and tool
@@ -11371,7 +11354,6 @@ class GatewayRunner:
                     _interrupt_depth=_interrupt_depth + 1,
                     event_message_id=next_message_id,
                     channel_prompt=next_channel_prompt,
-                    event_extra=getattr(pending_event, "extra", None) if pending_event else event_extra,
                 )
         finally:
             # Stop progress sender, interrupt monitor, and notification task
