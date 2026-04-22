@@ -1186,6 +1186,171 @@ def _normalize_main_runtime(main_runtime: Optional[Dict[str, Any]]) -> Dict[str,
     return normalized
 
 
+_cached_fallback_providers: Optional[List[Dict[str, str]]] = None
+
+
+def _load_fallback_providers() -> List[Dict[str, str]]:
+    """Load fallback_providers from config.yaml (cached per process)."""
+    global _cached_fallback_providers
+    if _cached_fallback_providers is not None:
+        return _cached_fallback_providers
+    try:
+        from hermes_cli.config import load_config
+        cfg = load_config()
+        raw = cfg.get("fallback_providers")
+        # cfg.get("key") returns None (not the default) when the key exists
+        # with a null/yaml-null value, so we must distinguish "absent" from "null".
+        # ruamel.yaml returns CommentedSeq instead of plain list — accept any
+        # non-string iterable.
+        if raw is None:
+            providers = []
+        elif isinstance(raw, (str, bytes)):
+            providers = []
+        else:
+            try:
+                providers = list(raw)
+            except Exception:
+                providers = []
+        if providers:
+            logger.debug(
+                "Loaded %d fallback provider(s) from config.yaml", len(providers))
+        elif raw is not None:
+            # Key exists but is not a list — warn so operators can fix config.
+            logger.warning(
+                "fallback_providers in config.yaml is not a list (got %s); ignoring.",
+                type(raw).__name__)
+        _cached_fallback_providers = providers
+    except Exception as exc:
+        logger.warning("Could not load fallback_providers from config: %s", exc)
+        _cached_fallback_providers = []
+    return _cached_fallback_providers
+
+
+def _try_configured_fallback(
+    failed_provider: str,
+    task: str = None,
+    reason: str = "error",
+) -> Tuple[Optional[Any], Optional[str], str]:
+    """Try configured fallback_providers from config.yaml.
+
+    Iterates the user's configured fallback list, skipping the provider that
+    failed.  Returns (client, model, provider_label) or (None, None, "").
+
+    If no fallback_providers are configured, falls through immediately.
+    """
+    providers = _load_fallback_providers()
+    if not providers:
+        return None, None, ""
+
+    skip = (failed_provider or "").lower().strip()
+    main_provider = _read_main_provider() or ""
+    tried = []
+    for entry in providers:
+        if not isinstance(entry, dict):
+            logger.warning(
+                "Skipping malformed fallback_providers entry (not a dict): %r", entry)
+            continue
+        p = (entry.get("provider") or "").lower().strip()
+        if not p or p == skip or p == main_provider.lower():
+            continue
+        try:
+            client, model = _build_client_from_entry(entry, task=task)
+            if client is not None:
+                label = entry.get("provider", "custom")
+                model = model or entry.get("model")
+                logger.info(
+                    "Auxiliary %s: %s on %s — falling back to configured %s (%s)",
+                    task or "call", reason, failed_provider, label, model or "default")
+                return client, model, label
+        except Exception as exc:
+            logger.debug("Configured fallback %s unavailable: %s", p, exc)
+        tried.append(p)
+
+    if tried:
+        logger.warning(
+            "Auxiliary %s: no configured fallback available (tried: %s)",
+            task or "call", ", ".join(tried))
+    return None, None, ""
+
+
+def _build_client_from_entry(
+    entry: Dict[str, str],
+    task: str = None,
+) -> Tuple[Optional[Any], Optional[str]]:
+    """Build a client from a fallback_providers entry dict.
+
+    Handles three cases:
+      1. Entry has base_url → build direct OpenAI client with base_url + api_key.
+      2. Entry has a named provider (no base_url) → look up provider in
+         PROVIDER_REGISTRY to get base_url + api_key from credential pool.
+      3. Otherwise → skip (no usable config).
+    """
+    provider = (entry.get("provider") or "custom").strip().lower()
+    model = (entry.get("model") or "").strip() or None
+    base_url = (entry.get("base_url") or "").strip() or None
+    api_key = (entry.get("api_key") or "").strip() or None
+
+    # Skip placeholder entries (e.g. model="" and no base_url)
+    if not model and not base_url:
+        return None, None
+
+    # Case 1: direct custom endpoint
+    if base_url:
+        if not api_key:
+            api_key = os.getenv("OPENAI_API_KEY", "").strip()
+        if not api_key:
+            return None, None
+        from urllib.parse import urlparse
+        parsed = urlparse(base_url)
+        # Guard against obviously invalid URLs before they reach the client.
+        if not parsed.scheme or not parsed.netloc:
+            logger.warning(
+                "Skipping fallback entry with invalid base_url (no scheme/netloc): %s",
+                base_url)
+            return None, None
+        # Warn if OPENAI_API_KEY is being forwarded to an arbitrary base_url —
+        # this is intentional for self-hosted proxies but should be deliberate.
+        if "OPENAI_API_KEY" in os.environ and not entry.get("api_key"):
+            logger.warning(
+                "fallback_providers entry for %s has no api_key; "
+                "OPENAI_API_KEY will be forwarded to base_url %s. "
+                "Set api_key explicitly in config.yaml to silence this.",
+                provider, base_url)
+        # Normalize: if path is /anthropic or /, replace with /v1
+        path = parsed.path.rstrip("/")
+        if path in ("", "/anthropic"):
+            base_url = f"{parsed.scheme}://{parsed.netloc}/v1"
+        else:
+            base_url = f"{parsed.scheme}://{parsed.netloc}{path}"
+        client = OpenAI(api_key=api_key, base_url=base_url)
+        return client, model
+
+    # Case 2: named provider → look up in registry / credential pool
+    norm_provider = _normalize_aux_provider(provider)
+    pool_present, pool_entry = _select_pool_entry(norm_provider)
+    if pool_present and pool_entry is not None:
+        pool_key = _pool_runtime_api_key(pool_entry)
+        if pool_key:
+            try:
+                from hermes_cli.auth import PROVIDER_REGISTRY
+                pconfig = PROVIDER_REGISTRY.get(norm_provider)
+                p_base = pconfig.inference_base_url if pconfig else None
+            except Exception:
+                p_base = None
+            resolved_base = _to_openai_base_url(
+                _pool_runtime_base_url(pool_entry, p_base) or (p_base or "")
+            )
+            if not resolved_base:
+                return None, None
+            extra = {}
+            if "api.kimi.com" in resolved_base.lower():
+                extra["default_headers"] = {"User-Agent": "KimiCLI/1.30.0"}
+            client = OpenAI(api_key=pool_key, base_url=resolved_base, **extra)
+            return client, model
+
+    return None, None
+
+
 def _get_provider_chain() -> List[tuple]:
     """Return the ordered provider detection chain.
 
@@ -1245,6 +1410,25 @@ def _is_connection_error(exc: Exception) -> bool:
     )):
         return True
     return False
+
+
+def _is_rate_limit_or_overload_error(exc: Exception) -> bool:
+    """Detect rate-limit (429) and server-overload (500/502/503/529) errors.
+
+    These warrant trying a different provider rather than retrying the same
+    one with backoff — especially when fallback_providers are configured.
+    """
+    status = getattr(exc, "status_code", None)
+    if status in (429, 500, 502, 503, 529):
+        return True
+    err_lower = str(exc).lower()
+    rate_limit_kw = (
+        "rate limit", "rate_limit", "too many requests", "throttled",
+        "resource_exhausted", "requests per minute", "tokens per minute",
+        "overloaded", "service unavailable", "try again in", "please retry after",
+        "too many concurrent",
+    )
+    return any(kw in err_lower for kw in rate_limit_kw)
 
 
 def _try_payment_fallback(
@@ -2639,33 +2823,54 @@ def call_llm(
                 return _validate_llm_response(
                     client.chat.completions.create(**kwargs), task)
             except Exception as retry_err:
-                # If the max_tokens retry also hits a payment or connection
-                # error, fall through to the fallback chain below.
-                if not (_is_payment_error(retry_err) or _is_connection_error(retry_err)):
+                # If the max_tokens retry also hits a payment, connection, or
+                # rate-limit error, fall through to the fallback chain below.
+                if not (
+                    _is_payment_error(retry_err)
+                    or _is_connection_error(retry_err)
+                    or _is_rate_limit_or_overload_error(retry_err)
+                ):
                     raise
                 first_err = retry_err
 
-        # ── Payment / credit exhaustion fallback ──────────────────────
-        # When the resolved provider returns 402 or a credit-related error,
-        # try alternative providers instead of giving up.  This handles the
-        # common case where a user runs out of OpenRouter credits but has
-        # Codex OAuth or another provider available.
-        #
-        # ── Connection error fallback ────────────────────────────────
-        # When a provider endpoint is unreachable (DNS failure, connection
-        # refused, timeout), try alternative providers.  This handles stale
-        # Codex/OAuth tokens that authenticate but whose endpoint is down,
-        # and providers the user never configured that got picked up by
-        # the auto-detection chain.
-        should_fallback = _is_payment_error(first_err) or _is_connection_error(first_err)
+        # ── Provider fallback (payment, connection, rate-limit, or server overload) ──
+        # When the resolved provider returns an error that warrants trying a
+        # different backend, first try the user's configured fallback_providers
+        # (from config.yaml), then fall back to the auto-detection chain.
+        should_fallback = (
+            _is_payment_error(first_err)
+            or _is_connection_error(first_err)
+            or _is_rate_limit_or_overload_error(first_err)
+        )
         # Only try alternative providers when the user didn't explicitly
         # configure this task's provider.  Explicit provider = hard constraint;
         # auto (the default) = best-effort fallback chain.  (#7559)
         is_auto = resolved_provider in ("auto", "", None)
         if should_fallback and is_auto:
-            reason = "payment error" if _is_payment_error(first_err) else "connection error"
+            reason = (
+                "payment error"
+                if _is_payment_error(first_err)
+                else "connection error"
+                if _is_connection_error(first_err)
+                else "rate limit / overload"
+            )
             logger.info("Auxiliary %s: %s on %s (%s), trying fallback",
                         task or "call", reason, resolved_provider, first_err)
+
+            # 1. Try configured fallback_providers first
+            fb_client, fb_model, fb_label = _try_configured_fallback(
+                resolved_provider, task, reason=reason)
+            if fb_client is not None:
+                fb_kwargs = _build_call_kwargs(
+                    fb_label, fb_model, messages,
+                    temperature=temperature, max_tokens=max_tokens,
+                    tools=tools, timeout=effective_timeout,
+                    extra_body=effective_extra_body,
+                    base_url=str(getattr(fb_client, "base_url", "") or ""))
+                return _validate_llm_response(
+                    fb_client.chat.completions.create(**fb_kwargs), task)
+
+            # 2. Fall through to the auto-detection chain
             fb_client, fb_model, fb_label = _try_payment_fallback(
                 resolved_provider, task, reason=reason)
             if fb_client is not None:
@@ -2837,19 +3042,51 @@ async def async_call_llm(
                 return _validate_llm_response(
                     await client.chat.completions.create(**kwargs), task)
             except Exception as retry_err:
-                # If the max_tokens retry also hits a payment or connection
-                # error, fall through to the fallback chain below.
-                if not (_is_payment_error(retry_err) or _is_connection_error(retry_err)):
+                # If the max_tokens retry also hits a payment, connection, or
+                # rate-limit error, fall through to the fallback chain below.
+                if not (
+                    _is_payment_error(retry_err)
+                    or _is_connection_error(retry_err)
+                    or _is_rate_limit_or_overload_error(retry_err)
+                ):
                     raise
                 first_err = retry_err
 
-        # ── Payment / connection fallback (mirrors sync call_llm) ─────
-        should_fallback = _is_payment_error(first_err) or _is_connection_error(first_err)
+        # ── Provider fallback (payment, connection, rate-limit, or server overload) ──
+        should_fallback = (
+            _is_payment_error(first_err)
+            or _is_connection_error(first_err)
+            or _is_rate_limit_or_overload_error(first_err)
+        )
         is_auto = resolved_provider in ("auto", "", None)
         if should_fallback and is_auto:
-            reason = "payment error" if _is_payment_error(first_err) else "connection error"
+            reason = (
+                "payment error"
+                if _is_payment_error(first_err)
+                else "connection error"
+                if _is_connection_error(first_err)
+                else "rate limit / overload"
+            )
             logger.info("Auxiliary %s (async): %s on %s (%s), trying fallback",
                         task or "call", reason, resolved_provider, first_err)
+
+            # 1. Try configured fallback_providers first
+            fb_client, fb_model, fb_label = _try_configured_fallback(
+                resolved_provider, task, reason=reason)
+            if fb_client is not None:
+                fb_kwargs = _build_call_kwargs(
+                    fb_label, fb_model, messages,
+                    temperature=temperature, max_tokens=max_tokens,
+                    tools=tools, timeout=effective_timeout,
+                    extra_body=effective_extra_body,
+                    base_url=str(getattr(fb_client, "base_url", "") or ""))
+                async_fb, async_fb_model = _to_async_client(fb_client, fb_model or "")
+                if async_fb_model and async_fb_model != fb_kwargs.get("model"):
+                    fb_kwargs["model"] = async_fb_model
+                return _validate_llm_response(
+                    await async_fb.chat.completions.create(**fb_kwargs), task)
+
+            # 2. Fall through to the auto-detection chain
             fb_client, fb_model, fb_label = _try_payment_fallback(
                 resolved_provider, task, reason=reason)
             if fb_client is not None:
