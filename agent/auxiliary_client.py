@@ -2867,8 +2867,14 @@ def call_llm(
                     tools=tools, timeout=effective_timeout,
                     extra_body=effective_extra_body,
                     base_url=str(getattr(fb_client, "base_url", "") or ""))
-                return _validate_llm_response(
-                    fb_client.chat.completions.create(**fb_kwargs), task)
+                try:
+                    return _validate_llm_response(
+                        fb_client.chat.completions.create(**fb_kwargs), task)
+                except Exception as fb_exc:
+                    logger.warning(
+                        "Configured fallback %s (%s) also failed: %s; "
+                        "falling through to auto chain.",
+                        fb_label, fb_model, fb_exc)
 
             # 2. Fall through to the auto-detection chain
             fb_client, fb_model, fb_label = _try_payment_fallback(
@@ -3083,8 +3089,14 @@ async def async_call_llm(
                 async_fb, async_fb_model = _to_async_client(fb_client, fb_model or "")
                 if async_fb_model and async_fb_model != fb_kwargs.get("model"):
                     fb_kwargs["model"] = async_fb_model
-                return _validate_llm_response(
-                    await async_fb.chat.completions.create(**fb_kwargs), task)
+                try:
+                    return _validate_llm_response(
+                        await async_fb.chat.completions.create(**fb_kwargs), task)
+                except Exception as fb_exc:
+                    logger.warning(
+                        "Configured fallback %s (%s) also failed (async): %s; "
+                        "falling through to auto chain.",
+                        fb_label, fb_model, fb_exc)
 
             # 2. Fall through to the auto-detection chain
             fb_client, fb_model, fb_label = _try_payment_fallback(
