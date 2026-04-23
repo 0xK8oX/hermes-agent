@@ -69,6 +69,26 @@ OPENROUTER_MODELS: List[Tuple[str, str]] = [
 
 _openrouter_catalog_cache: List[Tuple[str, str]] | None = None
 
+VERCEL_AI_GATEWAY_MODELS: List[Tuple[str, str]] = [
+    ("moonshotai/kimi-k2.6",                 "recommended"),
+    ("alibaba/qwen3.6-plus",                 ""),
+    ("zai/glm-5.1",                          ""),
+    ("minimax/minimax-m2.7",                 ""),
+    ("anthropic/claude-sonnet-4.6",          ""),
+    ("anthropic/claude-opus-4.7",            ""),
+    ("anthropic/claude-opus-4.6",            ""),
+    ("anthropic/claude-haiku-4.5",           ""),
+    ("openai/gpt-5.4",                       ""),
+    ("openai/gpt-5.4-mini",                  ""),
+    ("openai/gpt-5.3-codex",                 ""),
+    ("google/gemini-3.1-pro-preview",        ""),
+    ("google/gemini-3-flash",                ""),
+    ("google/gemini-3.1-flash-lite-preview", ""),
+    ("xai/grok-4.20-reasoning",              ""),
+]
+
+_ai_gateway_catalog_cache: List[Tuple[str, str]] | None = None
+
 
 def _codex_curated_models() -> List[str]:
     """Derive the openai-codex curated list from codex_models.py.
@@ -1591,6 +1611,62 @@ def _resolve_copilot_catalog_api_key() -> str:
         return str(creds.get("api_key") or "").strip()
     except Exception:
         return ""
+
+
+_MODELS_DEV_PREFERRED: frozenset[str] = frozenset({
+    "opencode-go",
+    "opencode-zen",
+    "deepseek",
+    "kilocode",
+    "fireworks",
+    "mistral",
+    "togetherai",
+    "cohere",
+    "perplexity",
+    "groq",
+    "nvidia",
+    "huggingface",
+    "zai",
+    "gemini",
+    "google",
+})
+
+
+def _merge_with_models_dev(provider: str, curated: list[str]) -> list[str]:
+    """Merge curated list with fresh models.dev entries for a preferred provider.
+
+    Returns models.dev entries first (in models.dev order), then any
+    curated-only entries appended. Preserves case for curated fallbacks
+    (e.g. ``MiniMax-M2.7``) while trusting models.dev for newer variants.
+
+    If models.dev is unreachable or returns nothing, the curated list is
+    returned unchanged — this is the offline/CI fallback path.
+    """
+    try:
+        from agent.models_dev import list_agentic_models
+        mdev = list_agentic_models(provider)
+    except Exception:
+        mdev = []
+
+    if not mdev:
+        return list(curated)
+
+    # Case-insensitive dedup while preserving order and curated casing.
+    seen_lower: set[str] = set()
+    merged: list[str] = []
+    for mid in mdev:
+        key = str(mid).lower()
+        if key in seen_lower:
+            continue
+        seen_lower.add(key)
+        merged.append(mid)
+    for mid in curated:
+        key = str(mid).lower()
+        if key in seen_lower:
+            continue
+        seen_lower.add(key)
+        merged.append(mid)
+    return merged
 
 
 def provider_model_ids(provider: Optional[str], *, force_refresh: bool = False) -> List[str]:

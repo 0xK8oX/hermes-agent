@@ -15,6 +15,7 @@ from tools.file_operations import (
     normalize_search_pagination,
 )
 from tools import file_state
+from agent.file_safety import get_read_block_error
 from agent.redact import redact_sensitive_text
 
 logger = logging.getLogger(__name__)

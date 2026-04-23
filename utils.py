@@ -7,6 +7,7 @@ import stat
 import tempfile
 from pathlib import Path
 from typing import Any, Optional, Union
+from urllib.parse import urlparse
 
 import yaml
 

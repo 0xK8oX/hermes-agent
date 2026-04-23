@@ -7054,69 +7054,29 @@ class AIAgent:
             _omit_temp = False
             _fixed_temp = None
 
-        # ── max_tokens for chat_completions ──────────────────────────────
-        # Priority: ephemeral override (error recovery / length-continuation
-        # boost) > user-configured max_tokens > model metadata > provider-specific defaults > global fallback.
-        _ephemeral_out = getattr(self, "_ephemeral_max_output_tokens", None)
-        if _ephemeral_out is not None:
-            self._ephemeral_max_output_tokens = None  # consume immediately
-            api_kwargs.update(self._max_tokens_param(_ephemeral_out))
-        elif self.max_tokens is not None:
-            api_kwargs.update(self._max_tokens_param(self.max_tokens))
-        else:
-            _resolved_max_tokens = None
+        # Provider preferences (OpenRouter-specific)
+        _prefs: Dict[str, Any] = {}
+        if self.providers_allowed:
+            _prefs["only"] = self.providers_allowed
+        if self.providers_ignored:
+            _prefs["ignore"] = self.providers_ignored
+        if self.providers_order:
+            _prefs["order"] = self.providers_order
+        if self.provider_sort:
+            _prefs["sort"] = self.provider_sort
+        if self.provider_require_parameters:
+            _prefs["require_parameters"] = True
+        if self.provider_data_collection:
+            _prefs["data_collection"] = self.provider_data_collection
 
-            # 1. Try model metadata (endpoint /models or OpenRouter)
+        # Anthropic max output for Claude on OpenRouter/Nous
+        _ant_max = None
+        if (_is_or or _is_nous) and "claude" in (self.model or "").lower():
             try:
-                from agent.model_metadata import (
-                    fetch_endpoint_model_metadata,
-                    fetch_model_metadata,
-                )
-
-                _ep_meta = fetch_endpoint_model_metadata(
-                    self.base_url or "",
-                    getattr(self, "api_key", "") or "",
-                )
-                _model_bare = self.model.split("/")[-1] if self.model else ""
-                _entry = _ep_meta.get(self.model) or _ep_meta.get(_model_bare)
-                if _entry and _entry.get("max_completion_tokens"):
-                    _resolved_max_tokens = _entry["max_completion_tokens"]
-                else:
-                    _or_meta = fetch_model_metadata()
-                    _entry = _or_meta.get(self.model) or _or_meta.get(_model_bare)
-                    if _entry and _entry.get("max_completion_tokens"):
-                        _resolved_max_tokens = _entry["max_completion_tokens"]
+                from agent.anthropic_adapter import _get_anthropic_max_output
+                _ant_max = _get_anthropic_max_output(self.model)
             except Exception:
-                pass
-
-            # 2. Known provider fallbacks
-            if _resolved_max_tokens is None:
-                if "integrate.api.nvidia.com" in self._base_url_lower:
-                    # NVIDIA NIM defaults to a very low max_tokens when omitted,
-                    # causing models like GLM-4.7 to truncate immediately.
-                    _resolved_max_tokens = 16384
-                elif self._is_qwen_portal():
-                    # Qwen Portal defaults to a very low max_tokens when omitted.
-                    _resolved_max_tokens = 65536
-                elif "volces.com" in self._base_url_lower:
-                    # Volcengine coding endpoints default to a low max_tokens
-                    # (often 4096) even though models support 262K output.
-                    _resolved_max_tokens = 65536
-                elif (self._is_openrouter_url() or "nousresearch" in self._base_url_lower) and "claude" in (self.model or "").lower():
-                    try:
-                        from agent.anthropic_adapter import _get_anthropic_max_output
-                        _resolved_max_tokens = _get_anthropic_max_output(self.model)
-                    except Exception:
-                        pass
-
-            # 3. Global fallback — never let a provider default silently
-            # truncate tool calls. 32768 is large enough for multi-tool
-            # responses but safe for most APIs.
-            if _resolved_max_tokens is None:
-                _resolved_max_tokens = 32768
-
-            if _resolved_max_tokens is not None:
-                api_kwargs.update(self._max_tokens_param(_resolved_max_tokens))
+                pass  # fail open — let the proxy pick its default
 
         # Qwen session metadata precomputed here (promptId is per-call random)
         _qwen_meta = None
