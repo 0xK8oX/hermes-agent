@@ -105,10 +105,14 @@ def _get_scope_lock_path(scope: str, identity: str) -> Path:
 
 def _get_process_start_time(pid: int) -> Optional[int]:
     """Return the process start time as a Unix epoch timestamp (seconds).
-    
+
     Always returns epoch seconds regardless of platform.
     Uses /proc on Linux (converts from clock ticks), falls back to ps on macOS/BSD.
+    Returns None on Windows where neither /proc nor ps is available.
     """
+    if _IS_WINDOWS:
+        return None
+
     # Try Linux /proc first
     stat_path = Path(f"/proc/{pid}/stat")
     if stat_path.exists():
@@ -152,9 +156,13 @@ def _get_process_start_time(pid: int) -> Optional[int]:
 
 def _read_process_cmdline(pid: int) -> Optional[str]:
     """Return the process command line as a space-separated string.
-    
+
     Uses /proc on Linux, falls back to ps on macOS/BSD.
+    Returns None on Windows where neither /proc nor ps is available.
     """
+    if _IS_WINDOWS:
+        return None
+
     # Try Linux /proc first
     cmdline_path = Path(f"/proc/{pid}/cmdline")
     if cmdline_path.exists():

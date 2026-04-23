@@ -467,6 +467,7 @@ class TestHttpSessionLifecycle:
         adapter._session_lock_identity = None
 
         with patch("gateway.platforms.whatsapp._IS_WINDOWS", True), \
+             patch("gateway.status._IS_WINDOWS", True), \
              patch("gateway.platforms.whatsapp.subprocess.run", return_value=MagicMock(returncode=0)) as mock_run, \
              patch("gateway.platforms.whatsapp.asyncio.sleep", new_callable=AsyncMock):
             await adapter.disconnect()
