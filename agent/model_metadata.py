@@ -8,7 +8,7 @@ import logging
 import re
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple, Set
 from urllib.parse import urlparse
 
 import requests
@@ -156,17 +156,13 @@ DEFAULT_CONTEXT_LENGTHS = {
     "grok-3": 131072,           # grok-3, grok-3-mini, grok-3-fast, grok-3-mini-fast
     "grok-2": 131072,           # grok-2, grok-2-1212, grok-2-latest
     "grok": 131072,             # catch-all (grok-beta, unknown grok-*)
-    # Kimi
-    "kimi": 262144,
-    # Nemotron — NVIDIA's open-weights series (128K context across all sizes)
-    "nemotron": 131072,
-    # Kimi
-    "kimi": 262144,
     # Kimi / Moonshot
+    "kimi": 262144,              # Kimi fallback - 256K
     "k2p5": 262144,             # Kimi K2.5 - OpenRouter: 256K context
     "kimi-k2.5": 262144,         # Kimi K2.5 - OpenRouter: 256K context
     "kimi-k2": 131072,           # Kimi K2 - 128K context
-    "kimi": 262144,              # Kimi fallback - 256K
+    # Nemotron — NVIDIA's open-weights series (128K context across all sizes)
+    "nemotron": 131072,
     # Ark / ByteDance / Doubao
     "ark": 262144,             # ark-code-latest / doubao-seed-2.0-pro - 256K context (per your table)
     "ark-code": 262144,        # Ark code models - 256K context
@@ -406,7 +402,7 @@ def _coerce_reasonable_int(value: Any, minimum: int = 1024, maximum: int = 10_00
     return None
 
 
-def _extract_first_int(payload: Dict[str, Any], keys: tuple[str, ...]) -> Optional[int]:
+def _extract_first_int(payload: Dict[str, Any], keys: Tuple[str, ...]) -> Optional[int]:
     keyset = {key.lower() for key in keys}
     for mapping in _iter_nested_dicts(payload):
         for key, value in mapping.items():
@@ -541,7 +537,10 @@ def fetch_endpoint_model_metadata(
                 if context_length is not None:
                     entry["context_length"] = context_length
                 max_completion_tokens = _extract_max_completion_tokens(model)
-                if max_completion_tokens is not None:
+                # Volcengine endpoints return unreliable max_tokens defaults
+                # (often 4096) even though models support 262K output.
+                # Don't use them — let run_agent.py's provider-specific fallback (65536) take over.
+                if max_completion_tokens is not None and "volces.com" not in base_url.lower():
                     entry["max_completion_tokens"] = max_completion_tokens
                 pricing = _extract_pricing(model)
                 if pricing:
@@ -955,7 +954,7 @@ def get_model_context_length(
     model: str,
     base_url: str = "",
     api_key: str = "",
-    config_context_length: int | None = None,
+    config_context_length: Optional[int] = None,
     provider: str = "",
 ) -> int:
     """Get the context length for a model.

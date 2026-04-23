@@ -72,3 +72,5 @@ website/static/api/skills-index.json
 # Runtime artifacts
 output.log
 gateway.log
+pytest_output.log
+*.bak
