@@ -23,7 +23,7 @@ import logging
 import time
 import uuid
 from types import SimpleNamespace
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 import httpx
 
@@ -182,7 +182,7 @@ def _translate_tool_result_to_gemini(
     }
 
 
-def _build_gemini_contents(messages: List[Dict[str, Any]]) -> tuple[List[Dict[str, Any]], Optional[Dict[str, Any]]]:
+def _build_gemini_contents(messages: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], Optional[Dict[str, Any]]]:
     system_text_parts: List[str] = []
     contents: List[Dict[str, Any]] = []
     tool_name_by_call_id: Dict[str, str] = {}
@@ -739,7 +739,7 @@ class GeminiNativeClient:
         return headers
 
     @staticmethod
-    def _advance_stream_iterator(iterator: Iterator[_GeminiStreamChunk]) -> tuple[bool, Optional[_GeminiStreamChunk]]:
+    def _advance_stream_iterator(iterator: Iterator[_GeminiStreamChunk]) -> Tuple[bool, Optional[_GeminiStreamChunk]]:
         try:
             return False, next(iterator)
         except StopIteration:

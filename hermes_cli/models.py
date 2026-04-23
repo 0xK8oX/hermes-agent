@@ -14,7 +14,7 @@ import urllib.error
 import time
 from difflib import get_close_matches
 from pathlib import Path
-from typing import Any, NamedTuple, Optional
+from typing import Any, NamedTuple, Optional, List, Dict, Set
 
 from hermes_cli import __version__ as _HERMES_VERSION
 
@@ -31,7 +31,7 @@ COPILOT_REASONING_EFFORTS_O_SERIES = ["low", "medium", "high"]
 
 # Fallback OpenRouter snapshot used when the live catalog is unavailable.
 # (model_id, display description shown in menus)
-OPENROUTER_MODELS: list[tuple[str, str]] = [
+OPENROUTER_MODELS: List[Tuple[str, str]] = [
     ("moonshotai/kimi-k2.6",            "recommended"),
     ("anthropic/claude-opus-4.7",       ""),
     ("anthropic/claude-opus-4.6",       ""),
@@ -65,10 +65,10 @@ OPENROUTER_MODELS: list[tuple[str, str]] = [
     ("openai/gpt-5.4-nano",             ""),
 ]
 
-_openrouter_catalog_cache: list[tuple[str, str]] | None = None
+_openrouter_catalog_cache: List[Tuple[str, str]] | None = None
 
 
-def _codex_curated_models() -> list[str]:
+def _codex_curated_models() -> List[str]:
     """Derive the openai-codex curated list from codex_models.py.
 
     Single source of truth: DEFAULT_CODEX_MODELS + forward-compat synthesis.
@@ -79,7 +79,7 @@ def _codex_curated_models() -> list[str]:
     return _add_forward_compat_models(list(DEFAULT_CODEX_MODELS))
 
 
-_PROVIDER_MODELS: dict[str, list[str]] = {
+_PROVIDER_MODELS: Dict[str, List[str]] = {
     "nous": [
         "moonshotai/kimi-k2.6",
         "xiaomi/mimo-v2-pro",
@@ -355,7 +355,7 @@ _NOUS_ALLOWED_FREE_MODELS: frozenset[str] = frozenset({
 })
 
 
-def _is_model_free(model_id: str, pricing: dict[str, dict[str, str]]) -> bool:
+def _is_model_free(model_id: str, pricing: Dict[str, dict[str, str]]) -> bool:
     """Return True if *model_id* has zero-cost prompt AND completion pricing."""
     p = pricing.get(model_id)
     if not p:
@@ -367,9 +367,9 @@ def _is_model_free(model_id: str, pricing: dict[str, dict[str, str]]) -> bool:
 
 
 def filter_nous_free_models(
-    model_ids: list[str],
-    pricing: dict[str, dict[str, str]],
-) -> list[str]:
+    model_ids: List[str],
+    pricing: Dict[str, dict[str, str]],
+) -> List[str]:
     """Filter the Nous Portal model list according to free-model policy.
 
     Rules:
@@ -381,7 +381,7 @@ def filter_nous_free_models(
     if not pricing:
         return model_ids  # no pricing data — can't filter, show everything
 
-    result: list[str] = []
+    result: List[str] = []
     for mid in model_ids:
         free = _is_model_free(mid, pricing)
         if mid in _NOUS_ALLOWED_FREE_MODELS:
@@ -399,7 +399,7 @@ def filter_nous_free_models(
 # Nous Portal account tier detection
 # ---------------------------------------------------------------------------
 
-def fetch_nous_account_tier(access_token: str, portal_base_url: str = "") -> dict[str, Any]:
+def fetch_nous_account_tier(access_token: str, portal_base_url: str = "") -> Dict[str, Any]:
     """Fetch the user's Nous Portal account/subscription info.
 
     Calls ``<portal>/api/oauth/account`` with the OAuth access token.
@@ -433,7 +433,7 @@ def fetch_nous_account_tier(access_token: str, portal_base_url: str = "") -> dic
         return {}
 
 
-def is_nous_free_tier(account_info: dict[str, Any]) -> bool:
+def is_nous_free_tier(account_info: Dict[str, Any]) -> bool:
     """Return True if the account info indicates a free (unpaid) tier.
 
     Checks ``subscription.monthly_charge == 0``.  Returns False when
@@ -452,10 +452,10 @@ def is_nous_free_tier(account_info: dict[str, Any]) -> bool:
 
 
 def partition_nous_models_by_tier(
-    model_ids: list[str],
-    pricing: dict[str, dict[str, str]],
+    model_ids: List[str],
+    pricing: Dict[str, dict[str, str]],
     free_tier: bool,
-) -> tuple[list[str], list[str]]:
+) -> Tuple[List[str], List[str]]:
     """Split Nous models into (selectable, unavailable) based on user tier.
 
     For paid-tier users: all models are selectable, none unavailable
@@ -470,8 +470,8 @@ def partition_nous_models_by_tier(
     if not pricing:
         return (model_ids, [])  # can't determine, show everything
 
-    selectable: list[str] = []
-    unavailable: list[str] = []
+    selectable: List[str] = []
+    unavailable: List[str] = []
     for mid in model_ids:
         if _is_model_free(mid, pricing):
             selectable.append(mid)
@@ -485,7 +485,7 @@ def partition_nous_models_by_tier(
 # session while still picking up upgrades quickly.
 # ---------------------------------------------------------------------------
 _FREE_TIER_CACHE_TTL: int = 180  # seconds (3 minutes)
-_free_tier_cache: tuple[bool, float] | None = None  # (result, timestamp)
+_free_tier_cache: Tuple[bool, float] | None = None  # (result, timestamp)
 
 
 def check_nous_free_tier() -> bool:
@@ -548,7 +548,7 @@ class ProviderEntry(NamedTuple):
     tui_desc: str   # detailed description for `hermes model` TUI
 
 
-CANONICAL_PROVIDERS: list[ProviderEntry] = [
+CANONICAL_PROVIDERS: List[ProviderEntry] = [
     ProviderEntry("nous",           "Nous Portal",              "Nous Portal (Nous Research subscription)"),
     ProviderEntry("openrouter",     "OpenRouter",               "OpenRouter (100+ models, pay-per-use)"),
     ProviderEntry("anthropic",      "Anthropic",                "Anthropic (Claude models — API key or Claude Code)"),
@@ -674,7 +674,7 @@ def fetch_openrouter_models(
     timeout: float = 8.0,
     *,
     force_refresh: bool = False,
-) -> list[tuple[str, str]]:
+) -> List[Tuple[str, str]]:
     """Return the curated OpenRouter picker list, refreshed from the live catalog when possible."""
     global _openrouter_catalog_cache
 
@@ -698,7 +698,7 @@ def fetch_openrouter_models(
     if not isinstance(live_items, list):
         return list(_openrouter_catalog_cache or fallback)
 
-    live_by_id: dict[str, dict[str, Any]] = {}
+    live_by_id: Dict[str, dict[str, Any]] = {}
     for item in live_items:
         if not isinstance(item, dict):
             continue
@@ -707,7 +707,7 @@ def fetch_openrouter_models(
             continue
         live_by_id[mid] = item
 
-    curated: list[tuple[str, str]] = []
+    curated: List[Tuple[str, str]] = []
     for preferred_id in preferred_ids:
         live_item = live_by_id.get(preferred_id)
         if live_item is None:
@@ -724,7 +724,7 @@ def fetch_openrouter_models(
     return list(curated)
 
 
-def model_ids(*, force_refresh: bool = False) -> list[str]:
+def model_ids(*, force_refresh: bool = False) -> List[str]:
     """Return just the OpenRouter model-id strings."""
     return [mid for mid, _ in fetch_openrouter_models(force_refresh=force_refresh)]
 
@@ -736,7 +736,7 @@ def model_ids(*, force_refresh: bool = False) -> list[str]:
 # ---------------------------------------------------------------------------
 
 # Cache: maps model_id → {"prompt": str, "completion": str} per endpoint
-_pricing_cache: dict[str, dict[str, dict[str, str]]] = {}
+_pricing_cache: Dict[str, dict[str, dict[str, str]]] = {}
 
 
 def _format_price_per_mtok(per_token_str: str) -> str:
@@ -764,11 +764,11 @@ def _format_price_per_mtok(per_token_str: str) -> str:
 
 
 def format_model_pricing_table(
-    models: list[tuple[str, str]],
-    pricing_map: dict[str, dict[str, str]],
+    models: List[Tuple[str, str]],
+    pricing_map: Dict[str, dict[str, str]],
     current_model: str = "",
     indent: str = "      ",
-) -> list[str]:
+) -> List[str]:
     """Build a column-aligned model+pricing table for terminal display.
 
     Returns a list of pre-formatted lines ready to print.
@@ -778,7 +778,7 @@ def format_model_pricing_table(
         return []
 
     # Build rows: (model_id, input_price, output_price, cache_price, is_current)
-    rows: list[tuple[str, str, str, str, bool]] = []
+    rows: List[Tuple[str, str, str, str, bool]] = []
     has_cache = False
     for mid, _desc in models:
         is_cur = mid == current_model
@@ -805,7 +805,7 @@ def format_model_pricing_table(
         max((len(r[3]) for r in rows if r[3]), default=4),
         5,  # minimum: "Cache" header
     ) if has_cache else 0
-    lines: list[str] = []
+    lines: List[str] = []
 
     # Header
     if has_cache:
@@ -826,12 +826,12 @@ def format_model_pricing_table(
 
 
 def fetch_models_with_pricing(
-    api_key: str | None = None,
+    api_key: Optional[str] = None,
     base_url: str = "https://openrouter.ai/api",
     timeout: float = 8.0,
     *,
     force_refresh: bool = False,
-) -> dict[str, dict[str, str]]:
+) -> Dict[str, dict[str, str]]:
     """Fetch ``/v1/models`` and return ``{model_id: {prompt, completion}}`` pricing.
 
     Results are cached per *base_url* so repeated calls are free.
@@ -842,7 +842,7 @@ def fetch_models_with_pricing(
         return _pricing_cache[cache_key]
 
     url = cache_key.rstrip("/") + "/v1/models"
-    headers: dict[str, str] = {"Accept": "application/json"}
+    headers: Dict[str, str] = {"Accept": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
 
@@ -854,12 +854,12 @@ def fetch_models_with_pricing(
         _pricing_cache[cache_key] = {}
         return {}
 
-    result: dict[str, dict[str, str]] = {}
+    result: Dict[str, dict[str, str]] = {}
     for item in payload.get("data", []):
         mid = item.get("id")
         pricing = item.get("pricing")
         if mid and isinstance(pricing, dict):
-            entry: dict[str, str] = {
+            entry: Dict[str, str] = {
                 "prompt": str(pricing.get("prompt", "")),
                 "completion": str(pricing.get("completion", "")),
             }
@@ -878,7 +878,7 @@ def _resolve_openrouter_api_key() -> str:
     return os.getenv("OPENROUTER_API_KEY", "").strip()
 
 
-def _resolve_nous_pricing_credentials() -> tuple[str, str]:
+def _resolve_nous_pricing_credentials() -> Tuple[str, str]:
     """Return ``(api_key, base_url)`` for Nous Portal pricing, or empty strings."""
     try:
         from hermes_cli.auth import resolve_nous_runtime_credentials
@@ -890,7 +890,7 @@ def _resolve_nous_pricing_credentials() -> tuple[str, str]:
     return ("", "")
 
 
-def get_pricing_for_provider(provider: str, *, force_refresh: bool = False) -> dict[str, dict[str, str]]:
+def get_pricing_for_provider(provider: str, *, force_refresh: bool = False) -> Dict[str, dict[str, str]]:
     """Return live pricing for providers that support it (openrouter, nous)."""
     normalized = normalize_provider(provider)
     if normalized == "openrouter":
@@ -916,14 +916,14 @@ def get_pricing_for_provider(provider: str, *, force_refresh: bool = False) -> d
 
 
 # All provider IDs and aliases that are valid for the provider:model syntax.
-_KNOWN_PROVIDER_NAMES: set[str] = (
+_KNOWN_PROVIDER_NAMES: Set[str] = (
     set(_PROVIDER_LABELS.keys())
     | set(_PROVIDER_ALIASES.keys())
     | {"openrouter", "custom"}
 )
 
 
-def list_available_providers() -> list[dict[str, str]]:
+def list_available_providers() -> List[Dict[str, str]]:
     """Return info about all providers the user could use with ``provider:model``.
 
     Each dict has ``id``, ``label``, and ``aliases``.
@@ -936,7 +936,7 @@ def list_available_providers() -> list[dict[str, str]]:
     provider_order = [p.slug for p in CANONICAL_PROVIDERS] + ["custom"]
 
     # Build reverse alias map
-    aliases_for: dict[str, list[str]] = {}
+    aliases_for: Dict[str, List[str]] = {}
     for alias, canonical in _PROVIDER_ALIASES.items():
         aliases_for.setdefault(canonical, []).append(alias)
 
@@ -967,7 +967,7 @@ def list_available_providers() -> list[dict[str, str]]:
     return result
 
 
-def parse_model_input(raw: str, current_provider: str) -> tuple[str, str]:
+def parse_model_input(raw: str, current_provider: str) -> Tuple[str, str]:
     """Parse ``/model`` input into ``(provider, model)``.
 
     Supports ``provider:model`` syntax to switch providers at runtime::
@@ -1020,7 +1020,7 @@ def curated_models_for_provider(
     provider: Optional[str],
     *,
     force_refresh: bool = False,
-) -> list[tuple[str, str]]:
+) -> List[Tuple[str, str]]:
     """Return ``(model_id, description)`` tuples for a provider's model list.
 
     Tries to fetch the live model list from the provider's API first,
@@ -1044,7 +1044,7 @@ def curated_models_for_provider(
 def detect_provider_for_model(
     model_name: str,
     current_provider: str,
-) -> Optional[tuple[str, str]]:
+) -> Optional[Tuple[str, str]]:
     """Auto-detect the best provider for a model name.
 
     Returns ``(provider_id, model_name)`` — the model name may be remapped
@@ -1251,7 +1251,7 @@ def _is_anthropic_fast_model(model_id: Optional[str]) -> bool:
     return base in _ANTHROPIC_FAST_MODE_MODELS
 
 
-def resolve_fast_mode_overrides(model_id: Optional[str]) -> dict[str, Any] | None:
+def resolve_fast_mode_overrides(model_id: Optional[str]) -> Dict[str, Any] | None:
     """Return request_overrides for fast/priority mode, or None if unsupported.
 
     Returns provider-appropriate overrides:
@@ -1280,7 +1280,7 @@ def _resolve_copilot_catalog_api_key() -> str:
         return ""
 
 
-def provider_model_ids(provider: Optional[str], *, force_refresh: bool = False) -> list[str]:
+def provider_model_ids(provider: Optional[str], *, force_refresh: bool = False) -> List[str]:
     """Return the best known model catalog for a provider.
 
     Tries live API endpoints for providers that support them (Codex, Nous),
@@ -1340,7 +1340,7 @@ def provider_model_ids(provider: Optional[str], *, force_refresh: bool = False) 
     return list(_PROVIDER_MODELS.get(normalized, []))
 
 
-def _fetch_anthropic_models(timeout: float = 5.0) -> Optional[list[str]]:
+def _fetch_anthropic_models(timeout: float = 5.0) -> Optional[List[str]]:
     """Fetch available models from the Anthropic /v1/models endpoint.
 
     Uses resolve_anthropic_token() to find credentials (env vars or
@@ -1355,7 +1355,7 @@ def _fetch_anthropic_models(timeout: float = 5.0) -> Optional[list[str]]:
     if not token:
         return None
 
-    headers: dict[str, str] = {"anthropic-version": "2023-06-01"}
+    headers: Dict[str, str] = {"anthropic-version": "2023-06-01"}
     if _is_oauth_token(token):
         headers["Authorization"] = f"Bearer {token}"
         from agent.anthropic_adapter import _COMMON_BETAS, _OAUTH_ONLY_BETAS
@@ -1384,7 +1384,7 @@ def _fetch_anthropic_models(timeout: float = 5.0) -> Optional[list[str]]:
         return None
 
 
-def _payload_items(payload: Any) -> list[dict[str, Any]]:
+def _payload_items(payload: Any) -> List[Dict[str, Any]]:
     if isinstance(payload, list):
         return [item for item in payload if isinstance(item, dict)]
     if isinstance(payload, dict):
@@ -1394,7 +1394,7 @@ def _payload_items(payload: Any) -> list[dict[str, Any]]:
     return []
 
 
-def copilot_default_headers() -> dict[str, str]:
+def copilot_default_headers() -> Dict[str, str]:
     """Standard headers for Copilot API requests.
 
     Includes Openai-Intent and x-initiator headers that opencode and the
@@ -1412,7 +1412,7 @@ def copilot_default_headers() -> dict[str, str]:
         }
 
 
-def _copilot_catalog_item_is_text_model(item: dict[str, Any]) -> bool:
+def _copilot_catalog_item_is_text_model(item: Dict[str, Any]) -> bool:
     model_id = str(item.get("id") or "").strip()
     if not model_id:
         return False
@@ -1443,9 +1443,9 @@ def _copilot_catalog_item_is_text_model(item: dict[str, Any]) -> bool:
 
 def fetch_github_model_catalog(
     api_key: Optional[str] = None, timeout: float = 5.0
-) -> Optional[list[dict[str, Any]]]:
+) -> Optional[List[Dict[str, Any]]]:
     """Fetch the live GitHub Copilot model catalog for this account."""
-    attempts: list[dict[str, str]] = []
+    attempts: List[Dict[str, str]] = []
     if api_key:
         attempts.append({
             **copilot_default_headers(),
@@ -1459,8 +1459,8 @@ def fetch_github_model_catalog(
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 data = json.loads(resp.read().decode())
                 items = _payload_items(data)
-                models: list[dict[str, Any]] = []
-                seen_ids: set[str] = set()
+                models: List[Dict[str, Any]] = []
+                seen_ids: Set[str] = set()
                 for item in items:
                     if not _copilot_catalog_item_is_text_model(item):
                         continue
@@ -1484,7 +1484,7 @@ def _is_github_models_base_url(base_url: Optional[str]) -> bool:
     )
 
 
-def _fetch_github_models(api_key: Optional[str] = None, timeout: float = 5.0) -> Optional[list[str]]:
+def _fetch_github_models(api_key: Optional[str] = None, timeout: float = 5.0) -> Optional[List[str]]:
     catalog = fetch_github_model_catalog(api_key=api_key, timeout=timeout)
     if not catalog:
         return None
@@ -1528,9 +1528,9 @@ _COPILOT_MODEL_ALIASES = {
 
 
 def _copilot_catalog_ids(
-    catalog: Optional[list[dict[str, Any]]] = None,
+    catalog: Optional[List[Dict[str, Any]]] = None,
     api_key: Optional[str] = None,
-) -> set[str]:
+) -> Set[str]:
     if catalog is None and api_key:
         catalog = fetch_github_model_catalog(api_key=api_key)
     if not catalog:
@@ -1545,7 +1545,7 @@ def _copilot_catalog_ids(
 def normalize_copilot_model_id(
     model_id: Optional[str],
     *,
-    catalog: Optional[list[dict[str, Any]]] = None,
+    catalog: Optional[List[Dict[str, Any]]] = None,
     api_key: Optional[str] = None,
 ) -> str:
     raw = str(model_id or "").strip()
@@ -1568,7 +1568,7 @@ def normalize_copilot_model_id(
     if raw.endswith("-chat"):
         candidates.append(raw[:-5])
 
-    seen: set[str] = set()
+    seen: Set[str] = set()
     for candidate in candidates:
         if not candidate or candidate in seen:
             continue
@@ -1583,7 +1583,7 @@ def normalize_copilot_model_id(
     return raw
 
 
-def _github_reasoning_efforts_for_model_id(model_id: str) -> list[str]:
+def _github_reasoning_efforts_for_model_id(model_id: str) -> List[str]:
     raw = (model_id or "").strip().lower()
     if raw.startswith(("openai/o1", "openai/o3", "openai/o4", "o1", "o3", "o4")):
         return list(COPILOT_REASONING_EFFORTS_O_SERIES)
@@ -1613,7 +1613,7 @@ def _should_use_copilot_responses_api(model_id: str) -> bool:
 def copilot_model_api_mode(
     model_id: Optional[str],
     *,
-    catalog: Optional[list[dict[str, Any]]] = None,
+    catalog: Optional[List[Dict[str, Any]]] = None,
     api_key: Optional[str] = None,
 ) -> str:
     """Determine the API mode for a Copilot model.
@@ -1701,9 +1701,9 @@ def opencode_model_api_mode(provider_id: Optional[str], model_id: Optional[str])
 def github_model_reasoning_efforts(
     model_id: Optional[str],
     *,
-    catalog: Optional[list[dict[str, Any]]] = None,
+    catalog: Optional[List[Dict[str, Any]]] = None,
     api_key: Optional[str] = None,
-) -> list[str]:
+) -> List[str]:
     """Return supported reasoning-effort levels for a Copilot-visible model."""
     normalized = normalize_copilot_model_id(model_id, catalog=catalog, api_key=api_key)
     if not normalized:
@@ -1746,7 +1746,7 @@ def probe_api_models(
     api_key: Optional[str],
     base_url: Optional[str],
     timeout: float = 5.0,
-) -> dict[str, Any]:
+) -> Dict[str, Any]:
     """Probe an OpenAI-compatible ``/models`` endpoint with light URL heuristics."""
     normalized = (base_url or "").strip().rstrip("/")
     if not normalized:
@@ -1773,12 +1773,12 @@ def probe_api_models(
     else:
         alternate_base = normalized + "/v1"
 
-    candidates: list[tuple[str, bool]] = [(normalized, False)]
+    candidates: List[Tuple[str, bool]] = [(normalized, False)]
     if alternate_base and alternate_base != normalized:
         candidates.append((alternate_base, True))
 
-    tried: list[str] = []
-    headers: dict[str, str] = {"User-Agent": _HERMES_USER_AGENT}
+    tried: List[str] = []
+    headers: Dict[str, str] = {"User-Agent": _HERMES_USER_AGENT}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
     if normalized.startswith(COPILOT_BASE_URL):
@@ -1810,7 +1810,7 @@ def probe_api_models(
     }
 
 
-def _fetch_ai_gateway_models(timeout: float = 5.0) -> Optional[list[str]]:
+def _fetch_ai_gateway_models(timeout: float = 5.0) -> Optional[List[str]]:
     """Fetch available language models with tool-use from AI Gateway."""
     api_key = os.getenv("AI_GATEWAY_API_KEY", "").strip()
     if not api_key:
@@ -1821,7 +1821,7 @@ def _fetch_ai_gateway_models(timeout: float = 5.0) -> Optional[list[str]]:
         base_url = AI_GATEWAY_BASE_URL
 
     url = base_url.rstrip("/") + "/models"
-    headers: dict[str, str] = {"Authorization": f"Bearer {api_key}"}
+    headers: Dict[str, str] = {"Authorization": f"Bearer {api_key}"}
     req = urllib.request.Request(url, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -1841,7 +1841,7 @@ def fetch_api_models(
     api_key: Optional[str],
     base_url: Optional[str],
     timeout: float = 5.0,
-) -> Optional[list[str]]:
+) -> Optional[List[str]]:
     """Fetch the list of available model IDs from the provider's ``/models`` endpoint.
 
     Returns a list of model ID strings, or ``None`` if the endpoint could not
@@ -1892,7 +1892,7 @@ def _load_ollama_cloud_cache(*, ignore_ttl: bool = False) -> Optional[dict]:
     return None
 
 
-def _save_ollama_cloud_cache(models: list[str]) -> None:
+def _save_ollama_cloud_cache(models: List[str]) -> None:
     """Persist the merged Ollama Cloud model list to disk."""
     try:
         from utils import atomic_json_write
@@ -1908,7 +1908,7 @@ def fetch_ollama_cloud_models(
     base_url: Optional[str] = None,
     *,
     force_refresh: bool = False,
-) -> list[str]:
+) -> List[str]:
     """Fetch Ollama Cloud models by merging live API + models.dev, with disk cache.
 
     Resolution order:
@@ -1931,14 +1931,14 @@ def fetch_ollama_cloud_models(
     if not base_url:
         base_url = os.getenv("OLLAMA_BASE_URL", "") or "https://ollama.com/v1"
 
-    live_models: list[str] = []
+    live_models: List[str] = []
     if api_key:
         result = fetch_api_models(api_key, base_url, timeout=8.0)
         if result:
             live_models = result
 
     # 3. models.dev registry
-    mdev_models: list[str] = []
+    mdev_models: List[str] = []
     try:
         from agent.models_dev import list_agentic_models
         mdev_models = list_agentic_models("ollama-cloud")
@@ -1947,8 +1947,8 @@ def fetch_ollama_cloud_models(
 
     # 4. Merge: live first, then models.dev additions (deduped, order-preserving)
     if live_models or mdev_models:
-        seen: set[str] = set()
-        merged: list[str] = []
+        seen: Set[str] = set()
+        merged: List[str] = []
         for m in live_models:
             if m and m not in seen:
                 seen.add(m)
@@ -1975,7 +1975,7 @@ def validate_requested_model(
     *,
     api_key: Optional[str] = None,
     base_url: Optional[str] = None,
-) -> dict[str, Any]:
+) -> Dict[str, Any]:
     """
     Validate a ``/model`` value for the active provider.
 

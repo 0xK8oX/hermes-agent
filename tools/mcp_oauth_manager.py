@@ -38,7 +38,7 @@ import asyncio
 import logging
 import threading
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any, Optional, Dict
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +73,7 @@ class _ProviderEntry:
     provider: Optional[Any] = None
     last_mtime_ns: int = 0
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
-    pending_401: dict[str, "asyncio.Future[bool]"] = field(default_factory=dict)
+    pending_401: Dict[str, "asyncio.Future[bool]"] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -294,7 +294,7 @@ class MCPOAuthManager:
     """
 
     def __init__(self) -> None:
-        self._entries: dict[str, _ProviderEntry] = {}
+        self._entries: Dict[str, _ProviderEntry] = {}
         self._entries_lock = threading.Lock()
 
     # -- Provider construction / caching -------------------------------------

@@ -10,7 +10,7 @@ import logging
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple, List, Set
 
 from hermes_constants import display_hermes_home
 
@@ -44,7 +44,7 @@ def build_plan_path(
     return Path(".hermes") / "plans" / f"{timestamp}-{slug}.md"
 
 
-def _load_skill_payload(skill_identifier: str, task_id: str | None = None) -> tuple[dict[str, Any], Path | None, str] | None:
+def _load_skill_payload(skill_identifier: str, task_id: Optional[str] = None) -> Tuple[Dict[str, Any], Path | None, str] | None:
     """Load a skill by name/path and return (loaded_payload, skill_dir, display_name)."""
     raw_identifier = (skill_identifier or "").strip()
     if not raw_identifier:
@@ -88,7 +88,7 @@ def _load_skill_payload(skill_identifier: str, task_id: str | None = None) -> tu
     return loaded_skill, skill_dir, skill_name
 
 
-def _inject_skill_config(loaded_skill: dict[str, Any], parts: list[str]) -> None:
+def _inject_skill_config(loaded_skill: Dict[str, Any], parts: List[str]) -> None:
     """Resolve and inject skill-declared config values into the message parts.
 
     If the loaded skill's frontmatter declares ``metadata.hermes.config``
@@ -128,7 +128,7 @@ def _inject_skill_config(loaded_skill: dict[str, Any], parts: list[str]) -> None
 
 
 def _build_skill_message(
-    loaded_skill: dict[str, Any],
+    loaded_skill: Dict[str, Any],
     skill_dir: Path | None,
     activation_note: str,
     user_instruction: str = "",
@@ -300,7 +300,7 @@ def resolve_skill_command_key(command: str) -> Optional[str]:
 def build_skill_invocation_message(
     cmd_key: str,
     user_instruction: str = "",
-    task_id: str | None = None,
+    task_id: Optional[str] = None,
     runtime_note: str = "",
 ) -> Optional[str]:
     """Build the user message content for a skill slash command invocation.
@@ -336,18 +336,18 @@ def build_skill_invocation_message(
 
 
 def build_preloaded_skills_prompt(
-    skill_identifiers: list[str],
-    task_id: str | None = None,
-) -> tuple[str, list[str], list[str]]:
+    skill_identifiers: List[str],
+    task_id: Optional[str] = None,
+) -> Tuple[str, List[str], List[str]]:
     """Load one or more skills for session-wide CLI preloading.
 
     Returns (prompt_text, loaded_skill_names, missing_identifiers).
     """
-    prompt_parts: list[str] = []
-    loaded_names: list[str] = []
-    missing: list[str] = []
+    prompt_parts: List[str] = []
+    loaded_names: List[str] = []
+    missing: List[str] = []
 
-    seen: set[str] = set()
+    seen: Set[str] = set()
     for raw_identifier in skill_identifiers:
         identifier = (raw_identifier or "").strip()
         if not identifier or identifier in seen:

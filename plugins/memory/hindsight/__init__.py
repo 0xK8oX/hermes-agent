@@ -25,7 +25,7 @@ import os
 import threading
 
 from hermes_constants import get_hermes_home
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from agent.memory_provider import MemoryProvider
 from hermes_constants import get_hermes_home
@@ -203,8 +203,8 @@ class HindsightMemoryProvider(MemoryProvider):
         self._session_id = ""
 
         # Tags
-        self._tags: list[str] | None = None
-        self._recall_tags: list[str] | None = None
+        self._tags: Optional[List[str]] = None
+        self._recall_tags: Optional[List[str]] = None
         self._recall_tags_match = "any"
 
         # Retain controls
@@ -212,18 +212,18 @@ class HindsightMemoryProvider(MemoryProvider):
         self._retain_every_n_turns = 1
         self._retain_context = "conversation between Hermes Agent and the User"
         self._turn_counter = 0
-        self._session_turns: list[str] = []  # accumulates ALL turns for the session
+        self._session_turns: List[str] = []  # accumulates ALL turns for the session
 
         # Recall controls
         self._auto_recall = True
         self._recall_max_tokens = 4096
-        self._recall_types: list[str] | None = None
+        self._recall_types: Optional[List[str]] = None
         self._recall_prompt_preamble = ""
         self._recall_max_input_chars = 800
 
         # Bank
         self._bank_mission = ""
-        self._bank_retain_mission: str | None = None
+        self._bank_retain_mission: Optional[str] = None
         self._retain_async = True
 
     @property

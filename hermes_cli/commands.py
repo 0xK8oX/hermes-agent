@@ -17,7 +17,7 @@ import subprocess
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Optional, Tuple, List, Dict, Set, Callable
 
 # prompt_toolkit is an optional CLI dependency — only needed for
 # SlashCommandCompleter and SlashCommandAutoSuggest.  Gateway and test
@@ -44,19 +44,19 @@ class CommandDef:
     name: str                          # canonical name without slash: "background"
     description: str                   # human-readable description
     category: str                      # "Session", "Configuration", etc.
-    aliases: tuple[str, ...] = ()      # alternative names: ("bg",)
+    aliases: Tuple[str, ...] = ()      # alternative names: ("bg",)
     args_hint: str = ""                # argument placeholder: "<prompt>", "[name]"
-    subcommands: tuple[str, ...] = ()  # tab-completable subcommands
+    subcommands: Tuple[str, ...] = ()  # tab-completable subcommands
     cli_only: bool = False             # only available in CLI
     gateway_only: bool = False         # only available in gateway/messaging
-    gateway_config_gate: str | None = None  # config dotpath; when truthy, overrides cli_only for gateway
+    gateway_config_gate: Optional[str] = None  # config dotpath; when truthy, overrides cli_only for gateway
 
 
 # ---------------------------------------------------------------------------
 # Central registry -- single source of truth
 # ---------------------------------------------------------------------------
 
-COMMAND_REGISTRY: list[CommandDef] = [
+COMMAND_REGISTRY: List[CommandDef] = [
     # Session
     CommandDef("new", "Start a new session (fresh session ID + history)", "Session",
                aliases=("reset",)),
@@ -193,9 +193,9 @@ COMMAND_REGISTRY: list[CommandDef] = [
 # Derived lookups -- rebuilt once at import time, refreshed by rebuild_lookups()
 # ---------------------------------------------------------------------------
 
-def _build_command_lookup() -> dict[str, CommandDef]:
+def _build_command_lookup() -> Dict[str, CommandDef]:
     """Map every name and alias to its CommandDef."""
-    lookup: dict[str, CommandDef] = {}
+    lookup: Dict[str, CommandDef] = {}
     for cmd in COMMAND_REGISTRY:
         lookup[cmd.name] = cmd
         for alias in cmd.aliases:
@@ -203,7 +203,7 @@ def _build_command_lookup() -> dict[str, CommandDef]:
     return lookup
 
 
-_COMMAND_LOOKUP: dict[str, CommandDef] = _build_command_lookup()
+_COMMAND_LOOKUP: Dict[str, CommandDef] = _build_command_lookup()
 
 
 def resolve_command(name: str) -> CommandDef | None:
@@ -222,7 +222,7 @@ def _build_description(cmd: CommandDef) -> str:
 
 
 # Backwards-compatible flat dict: "/command" -> description
-COMMANDS: dict[str, str] = {}
+COMMANDS: Dict[str, str] = {}
 for _cmd in COMMAND_REGISTRY:
     if not _cmd.gateway_only:
         COMMANDS[f"/{_cmd.name}"] = _build_description(_cmd)
@@ -230,7 +230,7 @@ for _cmd in COMMAND_REGISTRY:
             COMMANDS[f"/{_alias}"] = f"{_cmd.description} (alias for /{_cmd.name})"
 
 # Backwards-compatible categorized dict
-COMMANDS_BY_CATEGORY: dict[str, dict[str, str]] = {}
+COMMANDS_BY_CATEGORY: Dict[str, dict[str, str]] = {}
 for _cmd in COMMAND_REGISTRY:
     if not _cmd.gateway_only:
         _cat = COMMANDS_BY_CATEGORY.setdefault(_cmd.category, {})
@@ -240,7 +240,7 @@ for _cmd in COMMAND_REGISTRY:
 
 
 # Subcommands lookup: "/cmd" -> ["sub1", "sub2", ...]
-SUBCOMMANDS: dict[str, list[str]] = {}
+SUBCOMMANDS: Dict[str, List[str]] = {}
 for _cmd in COMMAND_REGISTRY:
     if _cmd.subcommands:
         SUBCOMMANDS[f"/{_cmd.name}"] = list(_cmd.subcommands)
@@ -298,7 +298,7 @@ ACTIVE_SESSION_BYPASS_COMMANDS: frozenset[str] = frozenset(
 )
 
 
-def should_bypass_active_session(command_name: str | None) -> bool:
+def should_bypass_active_session(command_name: Optional[str]) -> bool:
     """Return True for any resolvable slash command.
 
     Rationale: every gateway-registered slash command either has a
@@ -321,7 +321,7 @@ def should_bypass_active_session(command_name: str | None) -> bool:
     return resolve_command(command_name) is not None if command_name else False
 
 
-def _resolve_config_gates() -> set[str]:
+def _resolve_config_gates() -> Set[str]:
     """Return canonical names of commands whose ``gateway_config_gate`` is truthy.
 
     Reads ``config.yaml`` and walks the dot-separated key path for each
@@ -336,7 +336,7 @@ def _resolve_config_gates() -> set[str]:
         cfg = read_raw_config()
     except Exception:
         return set()
-    result: set[str] = set()
+    result: Set[str] = set()
     for cmd in gated:
         val: Any = cfg
         for key in cmd.gateway_config_gate.split("."):
@@ -350,7 +350,7 @@ def _resolve_config_gates() -> set[str]:
     return result
 
 
-def _is_gateway_available(cmd: CommandDef, config_overrides: set[str] | None = None) -> bool:
+def _is_gateway_available(cmd: CommandDef, config_overrides: Set[str] | None = None) -> bool:
     """Check if *cmd* should appear in gateway surfaces (help, menus, mappings).
 
     Unconditionally available when ``cli_only`` is False.  When ``cli_only``
@@ -366,15 +366,15 @@ def _is_gateway_available(cmd: CommandDef, config_overrides: set[str] | None = N
     return False
 
 
-def gateway_help_lines() -> list[str]:
+def gateway_help_lines() -> List[str]:
     """Generate gateway help text lines from the registry."""
     overrides = _resolve_config_gates()
-    lines: list[str] = []
+    lines: List[str] = []
     for cmd in COMMAND_REGISTRY:
         if not _is_gateway_available(cmd, overrides):
             continue
         args = f" {cmd.args_hint}" if cmd.args_hint else ""
-        alias_parts: list[str] = []
+        alias_parts: List[str] = []
         for a in cmd.aliases:
             # Skip internal aliases like reload_mcp (underscore variant)
             if a.replace("-", "_") == cmd.name.replace("-", "_") and a != cmd.name:
@@ -385,7 +385,7 @@ def gateway_help_lines() -> list[str]:
     return lines
 
 
-def telegram_bot_commands() -> list[tuple[str, str]]:
+def telegram_bot_commands() -> List[Tuple[str, str]]:
     """Return (command_name, description) pairs for Telegram setMyCommands.
 
     Telegram command names cannot contain hyphens, so they are replaced with
@@ -393,7 +393,7 @@ def telegram_bot_commands() -> list[tuple[str, str]]:
     canonical command.
     """
     overrides = _resolve_config_gates()
-    result: list[tuple[str, str]] = []
+    result: List[Tuple[str, str]] = []
     for cmd in COMMAND_REGISTRY:
         if not _is_gateway_available(cmd, overrides):
             continue
@@ -430,9 +430,9 @@ def _sanitize_telegram_name(raw: str) -> str:
 
 
 def _clamp_command_names(
-    entries: list[tuple[str, str]],
-    reserved: set[str],
-) -> list[tuple[str, str]]:
+    entries: List[Tuple[str, str]],
+    reserved: Set[str],
+) -> List[Tuple[str, str]]:
     """Enforce 32-char command name limit with collision avoidance.
 
     Both Telegram and Discord cap slash command names at 32 characters.
@@ -441,8 +441,8 @@ def _clamp_command_names(
     shortened to 31 chars and a digit ``0``-``9`` is appended to differentiate.
     If all 10 digit slots are taken the entry is silently dropped.
     """
-    used: set[str] = set(reserved)
-    result: list[tuple[str, str]] = []
+    used: Set[str] = set(reserved)
+    result: List[Tuple[str, str]] = []
     for name, desc in entries:
         if len(name) > _CMD_NAME_LIMIT:
             candidate = name[:_CMD_NAME_LIMIT]
@@ -474,10 +474,10 @@ _clamp_telegram_names = _clamp_command_names
 def _collect_gateway_skill_entries(
     platform: str,
     max_slots: int,
-    reserved_names: set[str],
+    reserved_names: Set[str],
     desc_limit: int = 100,
     sanitize_name: "Callable[[str], str] | None" = None,
-) -> tuple[list[tuple[str, str, str]], int]:
+) -> Tuple[List[tuple[str, str, str]], int]:
     """Collect plugin + skill entries for a gateway platform.
 
     Priority order:
@@ -506,10 +506,10 @@ def _collect_gateway_skill_entries(
         number of skill entries dropped due to the cap.  ``cmd_key`` is the
         original ``/skill-name`` key from :func:`get_skill_commands`.
     """
-    all_entries: list[tuple[str, str, str]] = []
+    all_entries: List[Tuple[str, str, str]] = []
 
     # --- Tier 1: Plugin slash commands (never trimmed) ---------------------
-    plugin_pairs: list[tuple[str, str]] = []
+    plugin_pairs: List[Tuple[str, str]] = []
     try:
         from hermes_cli.plugins import get_plugin_commands
         plugin_cmds = get_plugin_commands()
@@ -531,14 +531,14 @@ def _collect_gateway_skill_entries(
         all_entries.append((n, d, ""))
 
     # --- Tier 2: Built-in skill commands (trimmed at cap) -----------------
-    _platform_disabled: set[str] = set()
+    _platform_disabled: Set[str] = set()
     try:
         from agent.skill_utils import get_disabled_skill_names
         _platform_disabled = get_disabled_skill_names(platform=platform)
     except Exception:
         pass
 
-    skill_triples: list[tuple[str, str, str]] = []
+    skill_triples: List[Tuple[str, str, str]] = []
     try:
         from agent.skill_commands import get_skill_commands
         from tools.skills_tool import SKILLS_DIR
@@ -585,7 +585,7 @@ def _collect_gateway_skill_entries(
 # Platform-specific wrappers
 # ---------------------------------------------------------------------------
 
-def telegram_menu_commands(max_commands: int = 100) -> tuple[list[tuple[str, str]], int]:
+def telegram_menu_commands(max_commands: int = 100) -> Tuple[List[tuple[str, str]], int]:
     """Return Telegram menu commands capped to the Bot API limit.
 
     Priority order (higher priority = never bumped by overflow):
@@ -621,8 +621,8 @@ def telegram_menu_commands(max_commands: int = 100) -> tuple[list[tuple[str, str
 
 def discord_skill_commands(
     max_slots: int,
-    reserved_names: set[str],
-) -> tuple[list[tuple[str, str, str]], int]:
+    reserved_names: Set[str],
+) -> Tuple[List[tuple[str, str, str]], int]:
     """Return skill entries for Discord slash command registration.
 
     Same priority and filtering logic as :func:`telegram_menu_commands`
@@ -650,8 +650,8 @@ def discord_skill_commands(
 
 
 def discord_skill_commands_by_category(
-    reserved_names: set[str],
-) -> tuple[dict[str, list[tuple[str, str, str]]], list[tuple[str, str, str]], int]:
+    reserved_names: Set[str],
+) -> Tuple[Dict[str, List[tuple[str, str, str]]], List[Tuple[str, str, str]], int]:
     """Return skill entries organized by category for Discord ``/skill`` subcommand groups.
 
     Skills whose directory is nested at least 2 levels under ``SKILLS_DIR``
@@ -673,7 +673,7 @@ def discord_skill_commands_by_category(
     """
     from pathlib import Path as _P
 
-    _platform_disabled: set[str] = set()
+    _platform_disabled: Set[str] = set()
     try:
         from agent.skill_utils import get_disabled_skill_names
         _platform_disabled = get_disabled_skill_names(platform="discord")
@@ -681,9 +681,9 @@ def discord_skill_commands_by_category(
         pass
 
     # Collect raw skill data --------------------------------------------------
-    categories: dict[str, list[tuple[str, str, str]]] = {}
-    uncategorized: list[tuple[str, str, str]] = []
-    _names_used: set[str] = set(reserved_names)
+    categories: Dict[str, List[Tuple[str, str, str]]] = {}
+    uncategorized: List[Tuple[str, str, str]] = []
+    _names_used: Set[str] = set(reserved_names)
     hidden = 0
 
     try:
@@ -739,7 +739,7 @@ def discord_skill_commands_by_category(
     _MAX_GROUPS = 25
     _MAX_PER_GROUP = 25
 
-    trimmed_categories: dict[str, list[tuple[str, str, str]]] = {}
+    trimmed_categories: Dict[str, List[Tuple[str, str, str]]] = {}
     group_count = 0
     for cat in sorted(categories):
         if group_count >= _MAX_GROUPS:
@@ -759,14 +759,14 @@ def discord_skill_commands_by_category(
     return trimmed_categories, uncategorized, hidden
 
 
-def slack_subcommand_map() -> dict[str, str]:
+def slack_subcommand_map() -> Dict[str, str]:
     """Return subcommand -> /command mapping for Slack /hermes handler.
 
     Maps both canonical names and aliases so /hermes bg do stuff works
     the same as /hermes background do stuff.
     """
     overrides = _resolve_config_gates()
-    mapping: dict[str, str] = {}
+    mapping: Dict[str, str] = {}
     for cmd in COMMAND_REGISTRY:
         if not _is_gateway_available(cmd, overrides):
             continue
@@ -785,13 +785,13 @@ class SlashCommandCompleter(Completer):
 
     def __init__(
         self,
-        skill_commands_provider: Callable[[], Mapping[str, dict[str, Any]]] | None = None,
+        skill_commands_provider: Callable[[], Mapping[str, Dict[str, Any]]] | None = None,
         command_filter: Callable[[str], bool] | None = None,
     ) -> None:
         self._skill_commands_provider = skill_commands_provider
         self._command_filter = command_filter
         # Cached project file list for fuzzy @ completions
-        self._file_cache: list[str] = []
+        self._file_cache: List[str] = []
         self._file_cache_time: float = 0.0
         self._file_cache_cwd: str = ""
 
@@ -803,7 +803,7 @@ class SlashCommandCompleter(Completer):
         except Exception:
             return True
 
-    def _iter_skill_commands(self) -> Mapping[str, dict[str, Any]]:
+    def _iter_skill_commands(self) -> Mapping[str, Dict[str, Any]]:
         if self._skill_commands_provider is None:
             return {}
         try:
@@ -823,7 +823,7 @@ class SlashCommandCompleter(Completer):
         return f"{cmd_name} " if cmd_name == word else cmd_name
 
     @staticmethod
-    def _extract_path_word(text: str) -> str | None:
+    def _extract_path_word(text: str) -> Optional[str]:
         """Extract the current word if it looks like a file path.
 
         Returns the path-like token under the cursor, or None if the
@@ -898,7 +898,7 @@ class SlashCommandCompleter(Completer):
             count += 1
 
     @staticmethod
-    def _extract_context_word(text: str) -> str | None:
+    def _extract_context_word(text: str) -> Optional[str]:
         """Extract a bare ``@`` token for context reference completions."""
         if not text:
             return None
@@ -981,7 +981,7 @@ class SlashCommandCompleter(Completer):
         query = word[1:]  # strip the @
         yield from self._fuzzy_file_completions(word, query, limit)
 
-    def _get_project_files(self) -> list[str]:
+    def _get_project_files(self) -> List[str]:
         """Return cached list of project files (refreshed every 5s)."""
         cwd = os.getcwd()
         now = time.monotonic()
@@ -992,7 +992,7 @@ class SlashCommandCompleter(Completer):
         ):
             return self._file_cache
 
-        files: list[str] = []
+        files: List[str] = []
         # Try rg first (fast, respects .gitignore), then fd, then find.
         for cmd in [
             ["rg", "--files", "--sortr=modified", cwd],

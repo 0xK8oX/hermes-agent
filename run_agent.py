@@ -37,7 +37,7 @@ import time
 import threading
 from types import SimpleNamespace
 import uuid
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple, Set
 from openai import OpenAI
 import fire
 from datetime import datetime
@@ -305,7 +305,7 @@ def _should_parallelize_tool_batch(tool_calls) -> bool:
     if any(name in _NEVER_PARALLEL_TOOLS for name in tool_names):
         return False
 
-    reserved_paths: list[Path] = []
+    reserved_paths: List[Path] = []
     for tool_call in tool_calls:
         tool_name = tool_call.function.name
         try:
@@ -707,9 +707,9 @@ class AIAgent:
         provider: str = None,
         api_mode: str = None,
         acp_command: str = None,
-        acp_args: list[str] | None = None,
+        acp_args: Optional[List[str]] = None,
         command: str = None,
-        args: list[str] | None = None,
+        args: Optional[List[str]] = None,
         model: str = "",
         max_iterations: int = 90,  # Default tool-calling iterations (shared with subagents)
         tool_delay: float = 1.0,
@@ -929,7 +929,7 @@ class AIAgent:
         # Interrupt mechanism for breaking out of tool loops
         self._interrupt_requested = False
         self._interrupt_message = None  # Optional message that triggered interrupt
-        self._execution_thread_id: int | None = None  # Set at run_conversation() start
+        self._execution_thread_id: Optional[int] = None  # Set at run_conversation() start
         self._interrupt_thread_signal_pending = False
         self._client_lock = threading.RLock()
 
@@ -950,7 +950,7 @@ class AIAgent:
         # `is_interrupted()` inside the worker to return True.  Track the
         # workers here so `interrupt()` / `clear_interrupt()` can fan out to
         # their tids explicitly.
-        self._tool_worker_threads: set[int] = set()
+        self._tool_worker_threads: Set[int] = set()
         self._tool_worker_threads_lock = threading.Lock()
         
         # Subagent delegation state
@@ -1004,7 +1004,7 @@ class AIAgent:
         # notifications to show progress.
         self._last_activity_ts: float = time.time()
         self._last_activity_desc: str = "initializing"
-        self._current_tool: str | None = None
+        self._current_tool: Optional[str] = None
         self._api_call_count: int = 0
 
         # Rate limit tracking — updated from x-ratelimit-* response headers
@@ -1787,7 +1787,7 @@ class AIAgent:
         # When running against an Ollama server, detect the model's max context
         # and pass num_ctx on every chat request so the full window is used.
         # User override: set model.ollama_num_ctx in config.yaml to cap VRAM use.
-        self._ollama_num_ctx: int | None = None
+        self._ollama_num_ctx: Optional[int] = None
         _ollama_num_ctx_override = None
         if isinstance(_model_cfg, dict):
             _ollama_num_ctx_override = _model_cfg.get("ollama_num_ctx")
@@ -2314,7 +2314,7 @@ class AIAgent:
             return cfg
         return float(os.getenv("HERMES_API_TIMEOUT", 1800.0))
 
-    def _resolved_api_call_stale_timeout_base(self) -> tuple[float, bool]:
+    def _resolved_api_call_stale_timeout_base(self) -> Tuple[float, bool]:
         """Resolve the base non-stream stale timeout and whether it is implicit.
 
         Priority:
@@ -2338,7 +2338,7 @@ class AIAgent:
 
         return 300.0, True
 
-    def _compute_non_stream_stale_timeout(self, messages: list[dict[str, Any]]) -> float:
+    def _compute_non_stream_stale_timeout(self, messages: List[Dict[str, Any]]) -> float:
         """Compute the effective non-stream stale timeout for this request."""
         stale_base, uses_implicit_default = self._resolved_api_call_stale_timeout_base()
         base_url = getattr(self, "_base_url", None) or self.base_url or ""
@@ -2363,7 +2363,7 @@ class AIAgent:
         base_url: Optional[str] = None,
         api_mode: Optional[str] = None,
         model: Optional[str] = None,
-    ) -> tuple[bool, bool]:
+    ) -> Tuple[bool, bool]:
         """Decide whether to apply Anthropic prompt caching and which layout to use.
 
         Returns ``(should_cache, use_native_layout)``:
@@ -4255,7 +4255,7 @@ class AIAgent:
                 logger.warning("Removed duplicate tool call: %s", tc.function.name)
         return unique if len(unique) < len(tool_calls) else tool_calls
 
-    def _repair_tool_call(self, tool_name: str) -> str | None:
+    def _repair_tool_call(self, tool_name: str) -> Optional[str]:
         """Attempt to repair a mismatched tool name before aborting.
 
         1. Try lowercase
@@ -4309,7 +4309,7 @@ class AIAgent:
         return _codex_deterministic_call_id(fn_name, arguments, index)
 
     @staticmethod
-    def _split_responses_tool_id(raw_id: Any) -> tuple[Optional[str], Optional[str]]:
+    def _split_responses_tool_id(raw_id: Any) -> Tuple[Optional[str], Optional[str]]:
         """Split a stored tool id into (call_id, response_item_id)."""
         return _codex_split_responses_tool_id(raw_id)
 
@@ -4344,7 +4344,7 @@ class AIAgent:
         """Extract a compact reasoning text from a Responses reasoning item."""
         return _codex_extract_responses_reasoning_text(item)
 
-    def _normalize_codex_response(self, response: Any) -> tuple[Any, str]:
+    def _normalize_codex_response(self, response: Any) -> Tuple[Any, str]:
         """Normalize a Responses API object to an assistant_message-like object."""
         return _codex_normalize_codex_response(response)
 
@@ -5082,7 +5082,7 @@ class AIAgent:
         has_retried_429: bool,
         classified_reason: Optional[FailoverReason] = None,
         error_context: Optional[Dict[str, Any]] = None,
-    ) -> tuple[bool, bool]:
+    ) -> Tuple[bool, bool]:
         """Attempt credential recovery via pool rotation.
 
         Returns (recovered, has_retried_429).
@@ -5976,6 +5976,7 @@ class AIAgent:
             else:
                 _stream_stale_timeout = _stream_stale_timeout_base
 
+        _call_start = time.time()
         t = threading.Thread(target=_call, daemon=True)
         t.start()
         _last_heartbeat = time.time()
@@ -6000,7 +6001,7 @@ class AIAgent:
                 # falsely declare the agent stuck.  The `(Xs, no chunks)`
                 # suffix is stripped by the detector's regex, but the
                 # `[heartbeat ~Mm]` marker survives and increments.
-                _hb_mins = int((_hb_now - _call_start_time) // 60)
+                _hb_mins = int((_hb_now - _call_start) // 60)
                 self._touch_activity(
                     f"waiting for stream response ({_waiting_secs}s, no chunks yet) [heartbeat ~{_hb_mins}m]"
                 )
@@ -6161,7 +6162,12 @@ class AIAgent:
             # falling through to OpenRouter defaults.
             fb_base_url_hint = (fb.get("base_url") or "").strip() or None
             fb_api_key_hint = (fb.get("api_key") or "").strip() or None
-            # Expand ${ENV_VAR} references in fallback api_key
+            # Expand ${ENV_VAR} references in fallback base_url and api_key
+            if fb_base_url_hint:
+                fb_base_url_hint = os.path.expandvars(fb_base_url_hint)
+                if fb_base_url_hint.startswith("${") and fb_base_url_hint.endswith("}"):
+                    # Var not set — treat as None so resolve_provider_client can fallback
+                    fb_base_url_hint = None
             if fb_api_key_hint:
                 fb_api_key_hint = os.path.expandvars(fb_api_key_hint)
                 if fb_api_key_hint.startswith("${") and fb_api_key_hint.endswith("}"):
@@ -6297,7 +6303,9 @@ class AIAgent:
             )
             return True
         except Exception as e:
-            logging.error("Failed to activate fallback %s: %s", fb_model, e)
+            import traceback
+            logging.error("Failed to activate fallback %s: %s\n%s", fb_model, e, traceback.format_exc())
+            self._emit_status(f"❌ Fallback to {fb_model} failed: {e}")
             return self._try_activate_fallback()  # try next in chain
 
     # ── Per-turn primary restoration ─────────────────────────────────────
@@ -6472,7 +6480,7 @@ class AIAgent:
         return False
 
     @staticmethod
-    def _materialize_data_url_for_vision(image_url: str) -> tuple[str, Optional[Path]]:
+    def _materialize_data_url_for_vision(image_url: str) -> Tuple[str, Optional[Path]]:
         header, _, data = str(image_url or "").partition(",")
         mime = "image/jpeg"
         if header.startswith("data:"):
@@ -6924,41 +6932,67 @@ class AIAgent:
 
         # ── max_tokens for chat_completions ──────────────────────────────
         # Priority: ephemeral override (error recovery / length-continuation
-        # boost) > user-configured max_tokens > provider-specific defaults.
+        # boost) > user-configured max_tokens > model metadata > provider-specific defaults > global fallback.
         _ephemeral_out = getattr(self, "_ephemeral_max_output_tokens", None)
         if _ephemeral_out is not None:
             self._ephemeral_max_output_tokens = None  # consume immediately
             api_kwargs.update(self._max_tokens_param(_ephemeral_out))
         elif self.max_tokens is not None:
             api_kwargs.update(self._max_tokens_param(self.max_tokens))
-        elif "integrate.api.nvidia.com" in self._base_url_lower:
-            # NVIDIA NIM defaults to a very low max_tokens when omitted,
-            # causing models like GLM-4.7 to truncate immediately (thinking
-            # tokens alone exhaust the budget).  16384 provides adequate room.
-            api_kwargs.update(self._max_tokens_param(16384))
-        elif self._is_qwen_portal():
-            # Qwen Portal defaults to a very low max_tokens when omitted.
-            # Reasoning models (qwen3-coder-plus) exhaust that budget on
-            # thinking tokens alone, causing the portal to return
-            # finish_reason="stop" with truncated output — the agent sees
-            # this as an intentional stop and exits the loop.  Send 65536
-            # (the documented max output for qwen3-coder models) so the
-            # model has adequate output budget for tool calls.
-            api_kwargs.update(self._max_tokens_param(65536))
-        elif (self._is_openrouter_url() or "nousresearch" in self._base_url_lower) and "claude" in (self.model or "").lower():
-            # OpenRouter and Nous Portal translate requests to Anthropic's
-            # Messages API, which requires max_tokens as a mandatory field.
-            # When we omit it, the proxy picks a default that can be too
-            # low — the model spends its output budget on thinking and has
-            # almost nothing left for the actual response (especially large
-            # tool calls like write_file).  Sending the model's real output
-            # limit ensures full capacity.
+        else:
+            _resolved_max_tokens = None
+
+            # 1. Try model metadata (endpoint /models or OpenRouter)
             try:
-                from agent.anthropic_adapter import _get_anthropic_max_output
-                _model_output_limit = _get_anthropic_max_output(self.model)
-                api_kwargs["max_tokens"] = _model_output_limit
+                from agent.model_metadata import (
+                    fetch_endpoint_model_metadata,
+                    fetch_model_metadata,
+                )
+
+                _ep_meta = fetch_endpoint_model_metadata(
+                    self.base_url or "",
+                    getattr(self, "api_key", "") or "",
+                )
+                _model_bare = self.model.split("/")[-1] if self.model else ""
+                _entry = _ep_meta.get(self.model) or _ep_meta.get(_model_bare)
+                if _entry and _entry.get("max_completion_tokens"):
+                    _resolved_max_tokens = _entry["max_completion_tokens"]
+                else:
+                    _or_meta = fetch_model_metadata()
+                    _entry = _or_meta.get(self.model) or _or_meta.get(_model_bare)
+                    if _entry and _entry.get("max_completion_tokens"):
+                        _resolved_max_tokens = _entry["max_completion_tokens"]
             except Exception:
-                pass  # fail open — let the proxy pick its default
+                pass
+
+            # 2. Known provider fallbacks
+            if _resolved_max_tokens is None:
+                if "integrate.api.nvidia.com" in self._base_url_lower:
+                    # NVIDIA NIM defaults to a very low max_tokens when omitted,
+                    # causing models like GLM-4.7 to truncate immediately.
+                    _resolved_max_tokens = 16384
+                elif self._is_qwen_portal():
+                    # Qwen Portal defaults to a very low max_tokens when omitted.
+                    _resolved_max_tokens = 65536
+                elif "volces.com" in self._base_url_lower:
+                    # Volcengine coding endpoints default to a low max_tokens
+                    # (often 4096) even though models support 262K output.
+                    _resolved_max_tokens = 65536
+                elif (self._is_openrouter_url() or "nousresearch" in self._base_url_lower) and "claude" in (self.model or "").lower():
+                    try:
+                        from agent.anthropic_adapter import _get_anthropic_max_output
+                        _resolved_max_tokens = _get_anthropic_max_output(self.model)
+                    except Exception:
+                        pass
+
+            # 3. Global fallback — never let a provider default silently
+            # truncate tool calls. 32768 is large enough for multi-tool
+            # responses but safe for most APIs.
+            if _resolved_max_tokens is None:
+                _resolved_max_tokens = 32768
+
+            if _resolved_max_tokens is not None:
+                api_kwargs.update(self._max_tokens_param(_resolved_max_tokens))
 
         extra_body = {}
 
@@ -7068,7 +7102,7 @@ class AIAgent:
         )
         return any(model.startswith(prefix) for prefix in reasoning_model_prefixes)
 
-    def _github_models_reasoning_extra_body(self) -> dict | None:
+    def _github_models_reasoning_extra_body(self) -> Optional[dict]:
         """Format reasoning payload for GitHub Models/OpenAI-compatible routes."""
         try:
             from hermes_cli.models import github_model_reasoning_efforts
@@ -7220,7 +7254,7 @@ class AIAgent:
                     "id": call_id,
                     "call_id": call_id,
                     "response_item_id": response_item_id,
-                    "type": tool_call.type,
+                    "type": tool_call.type or "function",
                     "function": {
                         "name": tool_call.function.name,
                         "arguments": tool_call.function.arguments
@@ -7686,7 +7720,7 @@ class AIAgent:
         import textwrap as _tw
         cols = _shutil.get_terminal_size((120, 24)).columns
         wrap_width = max(40, cols - len(indent))
-        out_lines: list[str] = []
+        out_lines: List[str] = []
         for raw_line in text.split("\n"):
             if len(raw_line) <= wrap_width:
                 out_lines.append(raw_line)
@@ -8867,7 +8901,7 @@ class AIAgent:
                 platform=getattr(self, "platform", None) or "",
                 sender_id=getattr(self, "_user_id", None) or "",
             )
-            _ctx_parts: list[str] = []
+            _ctx_parts: List[str] = []
             for r in _pre_results:
                 if isinstance(r, dict) and r.get("context"):
                     _ctx_parts.append(str(r["context"]))

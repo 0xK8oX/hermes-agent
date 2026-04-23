@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any, Dict, Literal, Optional
+from typing import Any, Dict, Literal, Optional, Tuple, List
 
 from agent.model_metadata import fetch_endpoint_model_metadata, fetch_model_metadata
 
@@ -32,7 +32,7 @@ class CanonicalUsage:
     cache_write_tokens: int = 0
     reasoning_tokens: int = 0
     request_count: int = 1
-    raw_usage: Optional[dict[str, Any]] = None
+    raw_usage: Optional[Dict[str, Any]] = None
 
     @property
     def prompt_tokens(self) -> int:
@@ -72,7 +72,7 @@ class CostResult:
     label: str
     fetched_at: Optional[datetime] = None
     pricing_version: Optional[str] = None
-    notes: tuple[str, ...] = ()
+    notes: Tuple[str, ...] = ()
 
 
 _UTC_NOW = lambda: datetime.now(timezone.utc)
@@ -80,7 +80,7 @@ _UTC_NOW = lambda: datetime.now(timezone.utc)
 
 # Official docs snapshot entries. Models whose published pricing and cache
 # semantics are stable enough to encode exactly.
-_OFFICIAL_DOCS_PRICING: Dict[tuple[str, str], PricingEntry] = {
+_OFFICIAL_DOCS_PRICING: Dict[Tuple[str, str], PricingEntry] = {
     (
         "anthropic",
         "claude-opus-4-20250514",
@@ -574,7 +574,7 @@ def estimate_usage_cost(
     if not entry:
         return CostResult(amount_usd=None, status="unknown", source="none", label="n/a")
 
-    notes: list[str] = []
+    notes: List[str] = []
     amount = _ZERO
 
     if usage.input_tokens and entry.input_cost_per_million is None:

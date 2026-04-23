@@ -15,7 +15,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple, List
 
 from hermes_constants import get_hermes_home
 
@@ -177,7 +177,7 @@ def _prompt_plugin_env_vars(manifest: dict, console) -> None:
     from hermes_constants import display_hermes_home
 
     # Normalise to list-of-dicts
-    env_specs: list[dict] = []
+    env_specs: List[dict] = []
     for entry in requires_env:
         if isinstance(entry, str):
             env_specs.append({"name": entry})
@@ -740,7 +740,7 @@ def cmd_list() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _discover_memory_providers() -> list[tuple[str, str]]:
+def _discover_memory_providers() -> List[Tuple[str, str]]:
     """Return [(name, description), ...] for available memory providers."""
     try:
         from plugins.memory import discover_memory_providers
@@ -749,7 +749,7 @@ def _discover_memory_providers() -> list[tuple[str, str]]:
         return []
 
 
-def _discover_context_engines() -> list[tuple[str, str]]:
+def _discover_context_engines() -> List[Tuple[str, str]]:
     """Return [(name, description), ...] for available context engines."""
     try:
         from plugins.context_engine import discover_context_engines

@@ -26,6 +26,7 @@ from aiohttp.test_utils import TestClient, TestServer
 from gateway.config import Platform, PlatformConfig
 from gateway.platforms.base import MessageEvent, SendResult
 from gateway.platforms.webhook import WebhookAdapter, _INSECURE_NO_AUTH
+from typing import List
 
 
 # ---------------------------------------------------------------------------
@@ -81,7 +82,7 @@ class TestDeliverOnlyBypassesAgent:
         mock_target = _wire_mock_target(adapter)
 
         # Guard: handle_message must NOT be called in deliver_only mode
-        handle_message_calls: list[MessageEvent] = []
+        handle_message_calls: List[MessageEvent] = []
 
         async def _capture(event):
             handle_message_calls.append(event)

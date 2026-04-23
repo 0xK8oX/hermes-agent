@@ -333,6 +333,48 @@ class WhatsAppAdapter(BasePlatformAdapter):
         
         logger.info("[%s] Bridge found at %s", self.name, bridge_path)
         
+        # ── Early health check: if the bridge is already running and connected,
+        #    reuse it immediately regardless of lock state.  This avoids the common
+        #    race where `gateway run --replace` kills the old gateway but the lock
+        #    file still references a live (parent shell) PID.
+        import aiohttp
+        import asyncio as _asyncio_mod
+
+        # Ensure session directory exists (needed for lock path resolution)
+        self._session_path.mkdir(parents=True, exist_ok=True)
+
+        try:
+            async with aiohttp.ClientSession() as _health_session:
+                async with _health_session.get(
+                    f"http://127.0.0.1:{self._bridge_port}/health",
+                    timeout=aiohttp.ClientTimeout(total=2),
+                ) as _resp:
+                    if _resp.status == 200:
+                        _data = await _resp.json()
+                        if _data.get("status") == "connected":
+                            logger.info("[%s] Bridge already running and connected — reusing", self.name)
+                            # Try to acquire lock but don't block on failure; the
+                            # bridge proves the session is ours.
+                            try:
+                                self._acquire_platform_lock(
+                                    'whatsapp-session', str(self._session_path),
+                                    'WhatsApp session',
+                                )
+                            except Exception:
+                                pass
+                            self._mark_connected()
+                            self._bridge_process = None  # Not managed by us
+                            self._http_session = aiohttp.ClientSession()
+                            self._poll_task = asyncio.create_task(self._poll_messages())
+                            return True
+                        else:
+                            logger.info(
+                                "[%s] Bridge found but not connected (status: %s) — will restart",
+                                self.name, _data.get("status"),
+                            )
+        except Exception:
+            pass  # Bridge not running — proceed to lock + fresh start
+
         # Acquire scoped lock to prevent duplicate sessions
         lock_acquired = False
         try:
@@ -362,33 +404,6 @@ class WhatsAppAdapter(BasePlatformAdapter):
                 except Exception as e:
                     print(f"[{self.name}] Failed to install dependencies: {e}")
                     return False
-
-            # Ensure session directory exists
-            self._session_path.mkdir(parents=True, exist_ok=True)
-            
-            # Check if bridge is already running and connected
-            import aiohttp
-            import asyncio
-            try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(
-                        f"http://127.0.0.1:{self._bridge_port}/health",
-                        timeout=aiohttp.ClientTimeout(total=2)
-                    ) as resp:
-                        if resp.status == 200:
-                            data = await resp.json()
-                            bridge_status = data.get("status", "unknown")
-                            if bridge_status == "connected":
-                                print(f"[{self.name}] Using existing bridge (status: {bridge_status})")
-                                self._mark_connected()
-                                self._bridge_process = None  # Not managed by us
-                                self._http_session = aiohttp.ClientSession()
-                                self._poll_task = asyncio.create_task(self._poll_messages())
-                                return True
-                            else:
-                                print(f"[{self.name}] Bridge found but not connected (status: {bridge_status}), restarting")
-            except Exception:
-                pass  # Bridge not running, start a new one
             
             # Kill any orphaned bridge from a previous gateway run
             _kill_port_process(self._bridge_port)

@@ -6,6 +6,8 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
+from typing import List, Dict
+
 from gateway.platforms.feishu_comment import (
     parse_drive_comment_event,
     _ALLOWED_NOTICE_TYPES,
@@ -253,7 +255,7 @@ class TestWikiReverseLookup(unittest.TestCase):
         mock_lookup.assert_called_once_with(unittest.mock.ANY, "docx", "docx_token")
         self.assertEqual(mock_resolve.call_count, 2)
         # Second call should include wiki_token
-        second_call_kwargs = mock_resolve.call_args_list[1]
+        second_call_kwargs = mock_resolve.call_args_List[1]
         self.assertEqual(second_call_kwargs[1].get("wiki_token") or second_call_kwargs[0][3], "WIKI123")
 
 

@@ -23,7 +23,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
-from typing import List, NamedTuple, Optional
+from typing import List, NamedTuple, Optional, Dict
 
 from hermes_cli.providers import (
     custom_provider_slug,
@@ -102,7 +102,7 @@ class ModelIdentity(NamedTuple):
     family: str
 
 
-MODEL_ALIASES: dict[str, ModelIdentity] = {
+MODEL_ALIASES: Dict[str, ModelIdentity] = {
     # Anthropic
     "sonnet":    ModelIdentity("anthropic", "claude-sonnet"),
     "opus":      ModelIdentity("anthropic", "claude-opus"),
@@ -170,13 +170,13 @@ class DirectAlias(NamedTuple):
 
 
 # Built-in direct aliases (can be extended via config.yaml model_aliases:)
-_BUILTIN_DIRECT_ALIASES: dict[str, DirectAlias] = {}
+_BUILTIN_DIRECT_ALIASES: Dict[str, DirectAlias] = {}
 
 # Merged dict (builtins + user config); populated by _load_direct_aliases()
-DIRECT_ALIASES: dict[str, DirectAlias] = {}
+DIRECT_ALIASES: Dict[str, DirectAlias] = {}
 
 
-def _load_direct_aliases() -> dict[str, DirectAlias]:
+def _load_direct_aliases() -> Dict[str, DirectAlias]:
     """Load direct aliases from config.yaml ``model_aliases:`` section.
 
     Config format::
@@ -258,7 +258,7 @@ class CustomAutoResult:
 # Flag parsing
 # ---------------------------------------------------------------------------
 
-def parse_model_flags(raw_args: str) -> tuple[str, str, bool]:
+def parse_model_flags(raw_args: str) -> Tuple[str, str, bool]:
     """Parse --provider and --global flags from /model command args.
 
     Returns (model_input, explicit_provider, is_global).
@@ -287,7 +287,7 @@ def parse_model_flags(raw_args: str) -> tuple[str, str, bool]:
     # Extract --provider <name>
     parts = raw_args.split()
     i = 0
-    filtered: list[str] = []
+    filtered: List[str] = []
     while i < len(parts):
         if parts[i] == "--provider" and i + 1 < len(parts):
             explicit_provider = parts[i + 1]
@@ -307,7 +307,7 @@ def parse_model_flags(raw_args: str) -> tuple[str, str, bool]:
 def resolve_alias(
     raw_input: str,
     current_provider: str,
-) -> Optional[tuple[str, str, str]]:
+) -> Optional[Tuple[str, str, str]]:
     """Resolve a short alias against the current provider's catalog.
 
     Looks up *raw_input* in :data:`MODEL_ALIASES`, then searches the
@@ -368,8 +368,8 @@ def resolve_alias(
 def get_authenticated_provider_slugs(
     current_provider: str = "",
     user_providers: dict = None,
-    custom_providers: list | None = None,
-) -> list[str]:
+    custom_providers: Optional[list] = None,
+) -> List[str]:
     """Return slugs of providers that have credentials.
 
     Uses ``list_authenticated_providers()`` which is backed by the models.dev
@@ -389,8 +389,8 @@ def get_authenticated_provider_slugs(
 
 def _resolve_alias_fallback(
     raw_input: str,
-    authenticated_providers: list[str] = (),
-) -> Optional[tuple[str, str, str]]:
+    authenticated_providers: List[str] = (),
+) -> Optional[Tuple[str, str, str]]:
     """Try to resolve an alias on the user's authenticated providers.
 
     Falls back to ``("openrouter", "nous")`` only when no authenticated
@@ -417,7 +417,7 @@ def switch_model(
     is_global: bool = False,
     explicit_provider: str = "",
     user_providers: dict = None,
-    custom_providers: list | None = None,
+    custom_providers: Optional[list] = None,
 ) -> ModelSwitchResult:
     """Core model-switching pipeline shared between CLI and gateway.
 
@@ -750,7 +750,7 @@ def switch_model(
     model_info = get_model_info(target_provider, new_model)
 
     # --- Collect warnings ---
-    warnings: list[str] = []
+    warnings: List[str] = []
     if validation.get("message"):
         warnings.append(validation["message"])
     hermes_warn = _check_hermes_model_warning(new_model)
@@ -782,7 +782,7 @@ def switch_model(
 def list_authenticated_providers(
     current_provider: str = "",
     user_providers: dict = None,
-    custom_providers: list | None = None,
+    custom_providers: Optional[list] = None,
     max_models: int = 8,
 ) -> List[dict]:
     """Detect which providers have credentials and list their curated models.
@@ -796,7 +796,7 @@ def list_authenticated_providers(
       - name: str — display name
       - is_current: bool
       - is_user_defined: bool
-      - models: list[str] — curated model IDs (up to max_models)
+      - models: List[str] — curated model IDs (up to max_models)
       - total_models: int — total curated count
       - source: str — "built-in", "models.dev", "user-config"
 
@@ -818,7 +818,7 @@ def list_authenticated_providers(
     data = fetch_models_dev()
 
     # Build curated model lists keyed by hermes provider ID
-    curated: dict[str, list[str]] = dict(_PROVIDER_MODELS)
+    curated: Dict[str, List[str]] = dict(_PROVIDER_MODELS)
     curated["openrouter"] = [mid for mid, _ in OPENROUTER_MODELS]
     # "nous" shares OpenRouter's curated list if not separately defined
     if "nous" not in curated:

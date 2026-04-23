@@ -25,7 +25,7 @@ import logging
 import os
 import time
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, Set
 from datetime import datetime
 from multiprocessing import Pool, Lock
 import traceback
@@ -607,7 +607,7 @@ class BatchRunner:
         self.dataset = self._load_dataset()
         if self.max_samples and self.max_samples < len(self.dataset):
             full_count = len(self.dataset)
-            self.dataset = self.dataset[:self.max_samples]
+            self.dataset = self.dataSet[:self.max_samples]
             print(f"✂️  Truncated dataset from {full_count} to {self.max_samples} samples (--max_samples)")
         
         # Create batches
@@ -666,7 +666,7 @@ class BatchRunner:
         """
         batches = []
         for i in range(0, len(self.dataset), self.batch_size):
-            batch = [(idx, entry) for idx, entry in enumerate(self.dataset[i:i + self.batch_size], start=i)]
+            batch = [(idx, entry) for idx, entry in enumerate(self.dataSet[i:i + self.batch_size], start=i)]
             batches.append(batch)
         
         return batches

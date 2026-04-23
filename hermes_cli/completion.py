@@ -9,23 +9,23 @@ Supports bash, zsh, and fish.
 from __future__ import annotations
 
 import argparse
-from typing import Any
+from typing import Any, List, Dict, Set
 
 
-def _walk(parser: argparse.ArgumentParser) -> dict[str, Any]:
+def _walk(parser: argparse.ArgumentParser) -> Dict[str, Any]:
     """Recursively extract subcommands and flags from a parser.
 
     Uses _SubParsersAction._choices_actions to get canonical names (no aliases)
     along with their help text.
     """
-    flags: list[str] = []
-    subcommands: dict[str, Any] = {}
+    flags: List[str] = []
+    subcommands: Dict[str, Any] = {}
 
     for action in parser._actions:
         if isinstance(action, argparse._SubParsersAction):
             # _choices_actions has one entry per canonical name; aliases are
             # omitted, which keeps completion lists clean.
-            seen: set[str] = set()
+            seen: Set[str] = set()
             for pseudo in action._choices_actions:
                 name = pseudo.dest
                 if name in seen:
@@ -56,7 +56,7 @@ def generate_bash(parser: argparse.ArgumentParser) -> str:
     tree = _walk(parser)
     top_cmds = " ".join(sorted(tree["subcommands"]))
 
-    cases: list[str] = []
+    cases: List[str] = []
     for cmd in sorted(tree["subcommands"]):
         info = tree["subcommands"][cmd]
         if cmd == "profile" and info["subcommands"]:
@@ -144,13 +144,13 @@ complete -F _hermes_completion hermes
 def generate_zsh(parser: argparse.ArgumentParser) -> str:
     tree = _walk(parser)
 
-    top_cmds_lines: list[str] = []
+    top_cmds_lines: List[str] = []
     for cmd in sorted(tree["subcommands"]):
         help_text = _clean(tree["subcommands"][cmd].get("help", ""))
         top_cmds_lines.append(f"                '{cmd}:{help_text}'")
     top_cmds_str = "\n".join(top_cmds_lines)
 
-    sub_cases: list[str] = []
+    sub_cases: List[str] = []
     for cmd in sorted(tree["subcommands"]):
         info = tree["subcommands"][cmd]
         if not info["subcommands"]:
@@ -158,7 +158,7 @@ def generate_zsh(parser: argparse.ArgumentParser) -> str:
         if cmd == "profile":
             # Profile subcommand: complete actions, then profile names for
             # actions that accept a profile argument.
-            sub_lines: list[str] = []
+            sub_lines: List[str] = []
             for sc in sorted(info["subcommands"]):
                 sh = _clean(info["subcommands"][sc].get("help", ""))
                 sub_lines.append(f"                        '{sc}:{sh}'")
@@ -251,7 +251,7 @@ def generate_fish(parser: argparse.ArgumentParser) -> str:
     top_cmds = sorted(tree["subcommands"])
     top_cmds_str = " ".join(top_cmds)
 
-    lines: list[str] = [
+    lines: List[str] = [
         "# Hermes Agent fish completion",
         "# Add to your config:",
         "#   hermes completion fish | source",

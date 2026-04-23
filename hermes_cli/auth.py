@@ -33,7 +33,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 import yaml
@@ -392,7 +392,7 @@ def has_usable_secret(value: Any, *, min_length: int = 4) -> bool:
 
 def _resolve_api_key_provider_secret(
     provider_id: str, pconfig: ProviderConfig
-) -> tuple[str, str]:
+) -> Tuple[str, str]:
     """Resolve an API-key provider's token and indicate where it came from."""
     if provider_id == "copilot":
         # Use the dedicated copilot auth module for proper token validation
@@ -2811,7 +2811,7 @@ def _prompt_model_selection(
     name_col = max((len(m) for m in all_models), default=0) + 2 if has_pricing else 0
 
     # Pre-compute formatted prices and dynamic column widths
-    _price_cache: dict[str, tuple[str, str, str]] = {}
+    _price_cache: Dict[str, Tuple[str, str, str]] = {}
     price_col = 3  # minimum width
     cache_col = 0  # only set if any model has cache pricing
     has_cache = False

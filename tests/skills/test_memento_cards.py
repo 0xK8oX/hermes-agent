@@ -16,6 +16,7 @@ SCRIPTS_DIR = Path(__file__).resolve().parents[2] / "optional-skills" / "product
 sys.path.insert(0, str(SCRIPTS_DIR))
 
 import memento_cards
+from typing import List
 
 
 @pytest.fixture(autouse=True)
@@ -28,7 +29,7 @@ def isolated_data(tmp_path, monkeypatch):
     return data_dir
 
 
-def _run(capsys, argv: list[str]) -> dict:
+def _run(capsys, argv: List[str]) -> dict:
     """Run main() with given argv and return parsed JSON output."""
     with mock.patch("sys.argv", ["memento_cards"] + argv):
         memento_cards.main()

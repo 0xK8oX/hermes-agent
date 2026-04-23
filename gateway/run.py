@@ -28,7 +28,7 @@ from collections import OrderedDict
 from contextvars import copy_context
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, Optional, Any, List
+from typing import Dict, Optional, Any, List, Union
 
 # --- Agent cache tuning ---------------------------------------------------
 # Bounds the per-session AIAgent cache to prevent unbounded growth in
@@ -411,7 +411,7 @@ def _build_media_placeholder(event) -> str:
     return "\n".join(parts)
 
 
-def _dequeue_pending_event(adapter, session_key: str) -> MessageEvent | None:
+def _dequeue_pending_event(adapter, session_key: str) -> Optional[MessageEvent]:
     """Consume and return the full pending event for a session.
 
     Queued follow-ups must preserve their media metadata so they can re-enter
@@ -448,7 +448,7 @@ def _is_control_interrupt_message(message: Optional[str]) -> bool:
     return normalized in _CONTROL_INTERRUPT_MESSAGES
 
 
-def _check_unavailable_skill(command_name: str) -> str | None:
+def _check_unavailable_skill(command_name: str) -> Optional[str]:
     """Check if a command matches a known-but-inactive skill.
 
     Returns a helpful message if the skill exists but is disabled or only
@@ -550,7 +550,7 @@ def _expand_env_vars_inplace(obj):
                 _expand_env_vars_inplace(v)
 
 
-def _resolve_gateway_model(config: dict | None = None) -> str:
+def _resolve_gateway_model(config: Optional[dict] = None) -> str:
     """Read model from config.yaml — single source of truth.
 
     Without this, temporary AIAgent instances (memory flush, /compress) fall
@@ -593,7 +593,7 @@ def _resolve_hermes_bin() -> Optional[list[str]]:
     return None
 
 
-def _parse_session_key(session_key: str) -> "dict | None":
+def _parse_session_key(session_key: str) -> "Optional[dict]":
     """Parse a session key into its component parts.
 
     Session keys follow the format
@@ -619,7 +619,7 @@ def _parse_session_key(session_key: str) -> "dict | None":
     return None
 
 
-def _format_gateway_process_notification(evt: dict) -> "str | None":
+def _format_gateway_process_notification(evt: dict) -> "Optional[str]":
     """Format a watch pattern event from completion_queue into a [SYSTEM:] message."""
     evt_type = evt.get("type", "completion")
     _sid = evt.get("session_id", "unknown")
@@ -1405,7 +1405,7 @@ class GatewayRunner:
         return ""
 
     @staticmethod
-    def _load_reasoning_config() -> dict | None:
+    def _load_reasoning_config() -> Optional[dict]:
         """Load reasoning effort from config.yaml.
 
         Reads agent.reasoning_effort from config.yaml. Valid: "none",
@@ -1429,7 +1429,7 @@ class GatewayRunner:
         return result
 
     @staticmethod
-    def _load_service_tier() -> str | None:
+    def _load_service_tier() -> Optional[str]:
         """Load Priority Processing setting from config.yaml.
 
         Reads agent.service_tier from config.yaml. Accepted values mirror the CLI:
@@ -1561,7 +1561,21 @@ class GatewayRunner:
         return {}
 
     @staticmethod
-    def _load_fallback_model() -> list | dict | None:
+    def _load_smart_model_routing() -> dict:
+        """Load smart model routing config from config.yaml."""
+        try:
+            import yaml as _y
+            cfg_path = _hermes_home / "config.yaml"
+            if cfg_path.exists():
+                with open(cfg_path, encoding="utf-8") as _f:
+                    cfg = _y.safe_load(_f) or {}
+                return cfg.get("smart_model_routing", {}) or {}
+        except Exception:
+            pass
+        return {}
+
+    @staticmethod
+    def _load_fallback_model() -> Optional[Union[list, dict]]:
         """Load fallback provider chain from config.yaml.
 
         Returns a list of provider dicts (``fallback_providers``), a single
@@ -5203,9 +5217,16 @@ class GatewayRunner:
         old_entry = self.session_store._entries.get(session_key)
         self.session_store.reset_session(session_key)
 
-        # Clear any session-scoped model override so the next agent picks up
-        # the configured default instead of the previously switched model.
-        self._session_model_overrides.pop(session_key, None)
+        # Do NOT clear session-scoped model override — the binding (persisted or dynamic)
+        # is still active on this channel after reset, keep the override so the new agent
+        # picks it up correctly. Only clear if binding is gone.
+        try:
+            from gateway.extensions.channel_binding import _session_bindings
+            if session_key not in _session_bindings:
+                self._session_model_overrides.pop(session_key, None)
+        except Exception:
+            # If channel_binding not loaded or lookup failed, safe fallback: clear anyway
+            self._session_model_overrides.pop(session_key, None)
 
         # Extension hook: restore extension state after /reset
         from gateway.extensions import fire_hooks
@@ -9330,7 +9351,7 @@ class GatewayRunner:
         self,
         adapter: Any,
         session_key: str,
-        generation: int | None,
+        generation: Optional[int],
     ) -> None:
         """Bind a gateway run generation to the adapter's active-session event."""
         if not adapter or not session_key or generation is None:

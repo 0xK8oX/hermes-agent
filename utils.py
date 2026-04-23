@@ -6,7 +6,7 @@ import os
 import stat
 import tempfile
 from pathlib import Path
-from typing import Any, Union
+from typing import Any, Optional, Union
 
 import yaml
 
@@ -32,7 +32,7 @@ def env_var_enabled(name: str, default: str = "") -> bool:
     return is_truthy_value(os.getenv(name, default), default=False)
 
 
-def _preserve_file_mode(path: Path) -> "int | None":
+def _preserve_file_mode(path: Path) -> Optional[int]:
     """Capture the permission bits of *path* if it exists, else ``None``."""
     try:
         return stat.S_IMODE(path.stat().st_mode) if path.exists() else None
@@ -40,7 +40,7 @@ def _preserve_file_mode(path: Path) -> "int | None":
         return None
 
 
-def _restore_file_mode(path: Path, mode: "int | None") -> None:
+def _restore_file_mode(path: Path, mode: Optional[int]) -> None:
     """Re-apply *mode* to *path* after an atomic replace.
 
     ``tempfile.mkstemp`` creates files with 0o600 (owner-only).  After
@@ -116,7 +116,7 @@ def atomic_yaml_write(
     *,
     default_flow_style: bool = False,
     sort_keys: bool = False,
-    extra_content: str | None = None,
+    extra_content: Optional[str] = None,
 ) -> None:
     """Write YAML data to a file atomically.
 

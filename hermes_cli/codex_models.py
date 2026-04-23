@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple, Set
 
 import os
 
@@ -20,7 +20,7 @@ DEFAULT_CODEX_MODELS: List[str] = [
     "gpt-5.1-codex-mini",
 ]
 
-_FORWARD_COMPAT_TEMPLATE_MODELS: List[tuple[str, tuple[str, ...]]] = [
+_FORWARD_COMPAT_TEMPLATE_MODELS: List[Tuple[str, tuple[str, ...]]] = [
     ("gpt-5.4-mini", ("gpt-5.3-codex", "gpt-5.2-codex")),
     ("gpt-5.4", ("gpt-5.3-codex", "gpt-5.2-codex")),
     ("gpt-5.3-codex", ("gpt-5.2-codex",)),
@@ -35,7 +35,7 @@ def _add_forward_compat_models(model_ids: List[str]) -> List[str]:
     synthetic catalog / forward-compat behavior for GPT-5 Codex variants.
     """
     ordered: List[str] = []
-    seen: set[str] = set()
+    seen: Set[str] = set()
     for model_id in model_ids:
         if model_id not in seen:
             ordered.append(model_id)

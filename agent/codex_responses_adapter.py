@@ -16,7 +16,7 @@ import logging
 import re
 import uuid
 from types import SimpleNamespace
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from agent.prompt_builder import DEFAULT_AGENT_IDENTITY
 
@@ -126,7 +126,7 @@ def _deterministic_call_id(fn_name: str, arguments: str, index: int = 0) -> str:
     return f"call_{digest}"
 
 
-def _split_responses_tool_id(raw_id: Any) -> tuple[Optional[str], Optional[str]]:
+def _split_responses_tool_id(raw_id: Any) -> Tuple[Optional[str], Optional[str]]:
     """Split a stored tool id into (call_id, response_item_id)."""
     if not isinstance(raw_id, str):
         return None, None
@@ -648,7 +648,7 @@ def _extract_responses_reasoning_text(item: Any) -> str:
 # Full response normalization
 # ---------------------------------------------------------------------------
 
-def _normalize_codex_response(response: Any) -> tuple[Any, str]:
+def _normalize_codex_response(response: Any) -> Tuple[Any, str]:
     """Normalize a Responses API object to an assistant_message-like object."""
     output = getattr(response, "output", None)
     if not isinstance(output, list) or not output:

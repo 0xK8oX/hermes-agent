@@ -45,7 +45,7 @@ import logging
 import os
 import re
 import asyncio
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 import httpx
 from firecrawl import Firecrawl
 from agent.auxiliary_client import (
@@ -125,7 +125,7 @@ _firecrawl_client = None
 _firecrawl_client_config = None
 
 
-def _get_direct_firecrawl_config() -> Optional[tuple[Dict[str, str], tuple[str, Optional[str], Optional[str]]]]:
+def _get_direct_firecrawl_config() -> Optional[Tuple[Dict[str, str], Tuple[str, Optional[str], Optional[str]]]]:
     """Return explicit direct Firecrawl kwargs + cache key, or None when unset."""
     api_key = os.getenv("FIRECRAWL_API_KEY", "").strip()
     api_url = os.getenv("FIRECRAWL_API_URL", "").strip().rstrip("/")
@@ -181,7 +181,7 @@ def _firecrawl_backend_help_suffix() -> str:
     )
 
 
-def _web_requires_env() -> list[str]:
+def _web_requires_env() -> List[str]:
     """Return tool metadata env vars for the currently enabled web backends."""
     requires = [
         "EXA_API_KEY",
@@ -453,7 +453,7 @@ def _is_nous_auxiliary_client(client: Any) -> bool:
     return host == "nousresearch.com" or host.endswith(".nousresearch.com")
 
 
-def _resolve_web_extract_auxiliary(model: Optional[str] = None) -> tuple[Optional[Any], Optional[str], Dict[str, Any]]:
+def _resolve_web_extract_auxiliary(model: Optional[str] = None) -> Tuple[Optional[Any], Optional[str], Dict[str, Any]]:
     """Resolve the current web-extract auxiliary client, model, and extra body."""
     client, default_model = get_async_text_auxiliary_client("web_extract")
     configured_model = os.getenv("AUXILIARY_WEB_EXTRACT_MODEL", "").strip()
@@ -721,7 +721,7 @@ async def _process_large_content_chunked(
     logger.info("Split into %d chunks of ~%d chars each", len(chunks), chunk_size)
     
     # Summarize each chunk in parallel
-    async def summarize_chunk(chunk_idx: int, chunk_content: str) -> tuple[int, Optional[str]]:
+    async def summarize_chunk(chunk_idx: int, chunk_content: str) -> Tuple[int, Optional[str]]:
         """Summarize a single chunk."""
         try:
             chunk_info = f"[Processing chunk {chunk_idx + 1} of {len(chunks)}]"

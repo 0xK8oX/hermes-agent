@@ -14,7 +14,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple, List, Dict
 
 from hermes_constants import get_hermes_home
 
@@ -50,7 +50,7 @@ def _pending_file() -> Path:
     return get_hermes_home() / "pastes" / "pending.json"
 
 
-def _load_pending() -> list[dict]:
+def _load_pending() -> List[dict]:
     path = _pending_file()
     if not path.exists():
         return []
@@ -67,7 +67,7 @@ def _load_pending() -> list[dict]:
     return []
 
 
-def _save_pending(entries: list[dict]) -> None:
+def _save_pending(entries: List[dict]) -> None:
     path = _pending_file()
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -80,7 +80,7 @@ def _save_pending(entries: list[dict]) -> None:
         pass
 
 
-def _record_pending(urls: list[str], delay_seconds: int = _AUTO_DELETE_SECONDS) -> None:
+def _record_pending(urls: List[str], delay_seconds: int = _AUTO_DELETE_SECONDS) -> None:
     """Record *urls* for deletion at ``now + delay_seconds``.
 
     Only paste.rs URLs are recorded (dpaste.com auto-expires).  Entries
@@ -92,7 +92,7 @@ def _record_pending(urls: list[str], delay_seconds: int = _AUTO_DELETE_SECONDS) 
 
     entries = _load_pending()
     # Dedupe by URL: keep the later expire_at if same URL appears twice
-    by_url: dict[str, float] = {e["url"]: float(e["expire_at"]) for e in entries}
+    by_url: Dict[str, float] = {e["url"]: float(e["expire_at"]) for e in entries}
     expire_at = time.time() + delay_seconds
     for u in paste_rs_urls:
         by_url[u] = max(expire_at, by_url.get(u, 0.0))
@@ -100,7 +100,7 @@ def _record_pending(urls: list[str], delay_seconds: int = _AUTO_DELETE_SECONDS) 
     _save_pending(merged)
 
 
-def _sweep_expired_pastes(now: Optional[float] = None) -> tuple[int, int]:
+def _sweep_expired_pastes(now: Optional[float] = None) -> Tuple[int, int]:
     """Synchronously DELETE any pending pastes whose ``expire_at`` has passed.
 
     Returns ``(deleted, remaining)``.  Best-effort: failed deletes stay in
@@ -114,7 +114,7 @@ def _sweep_expired_pastes(now: Optional[float] = None) -> tuple[int, int]:
 
     current = time.time() if now is None else now
     deleted = 0
-    remaining: list[dict] = []
+    remaining: List[dict] = []
 
     for entry in entries:
         try:
@@ -205,7 +205,7 @@ def delete_paste(url: str) -> bool:
         return 200 <= resp.status < 300
 
 
-def _schedule_auto_delete(urls: list[str], delay_seconds: int = _AUTO_DELETE_SECONDS):
+def _schedule_auto_delete(urls: List[str], delay_seconds: int = _AUTO_DELETE_SECONDS):
     """Record *urls* for deletion ``delay_seconds`` from now.
 
     Previously this spawned a detached Python subprocess per call that slept
@@ -291,7 +291,7 @@ def upload_to_pastebin(content: str, expiry_days: int = 7) -> str:
 
     Returns the paste URL on success, raises on total failure.
     """
-    errors: list[str] = []
+    errors: List[str] = []
 
     # Try paste.rs first (simple, fast)
     try:
@@ -485,8 +485,8 @@ def run_debug_share(args):
         return
 
     print("Uploading...")
-    urls: dict[str, str] = {}
-    failures: list[str] = []
+    urls: Dict[str, str] = {}
+    failures: List[str] = []
 
     # 1. Summary report (required)
     try:

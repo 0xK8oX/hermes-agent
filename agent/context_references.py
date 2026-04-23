@@ -9,7 +9,7 @@ import re
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Awaitable, Callable
+from typing import Awaitable, Callable, Optional, Tuple, List, Set
 
 from agent.model_metadata import estimate_tokens_rough
 
@@ -44,23 +44,23 @@ class ContextReference:
     target: str
     start: int
     end: int
-    line_start: int | None = None
-    line_end: int | None = None
+    line_start: Optional[int] = None
+    line_end: Optional[int] = None
 
 
 @dataclass
 class ContextReferenceResult:
     message: str
     original_message: str
-    references: list[ContextReference] = field(default_factory=list)
-    warnings: list[str] = field(default_factory=list)
+    references: List[ContextReference] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
     injected_tokens: int = 0
     expanded: bool = False
     blocked: bool = False
 
 
-def parse_context_references(message: str) -> list[ContextReference]:
-    refs: list[ContextReference] = []
+def parse_context_references(message: str) -> List[ContextReference]:
+    refs: List[ContextReference] = []
     if not message:
         return refs
 
@@ -147,8 +147,8 @@ async def preprocess_context_references_async(
     allowed_root_path = (
         Path(allowed_root).expanduser().resolve() if allowed_root is not None else cwd_path
     )
-    warnings: list[str] = []
-    blocks: list[str] = []
+    warnings: List[str] = []
+    blocks: List[str] = []
     injected_tokens = 0
 
     for ref in refs:
@@ -209,7 +209,7 @@ async def _expand_reference(
     *,
     url_fetcher: Callable[[str], str | Awaitable[str]] | None = None,
     allowed_root: Path | None = None,
-) -> tuple[str | None, str | None]:
+) -> Tuple[Optional[str], Optional[str]]:
     try:
         if ref.kind == "file":
             return _expand_file_reference(ref, cwd, allowed_root=allowed_root)
@@ -238,7 +238,7 @@ def _expand_file_reference(
     cwd: Path,
     *,
     allowed_root: Path | None = None,
-) -> tuple[str | None, str | None]:
+) -> Tuple[Optional[str], Optional[str]]:
     path = _resolve_path(cwd, ref.target, allowed_root=allowed_root)
     _ensure_reference_path_allowed(path)
     if not path.exists():
@@ -265,7 +265,7 @@ def _expand_folder_reference(
     cwd: Path,
     *,
     allowed_root: Path | None = None,
-) -> tuple[str | None, str | None]:
+) -> Tuple[Optional[str], Optional[str]]:
     path = _resolve_path(cwd, ref.target, allowed_root=allowed_root)
     _ensure_reference_path_allowed(path)
     if not path.exists():
@@ -280,9 +280,9 @@ def _expand_folder_reference(
 def _expand_git_reference(
     ref: ContextReference,
     cwd: Path,
-    args: list[str],
+    args: List[str],
     label: str,
-) -> tuple[str | None, str | None]:
+) -> Tuple[Optional[str], Optional[str]]:
     try:
         result = subprocess.run(
             ["git", *args],
@@ -378,7 +378,7 @@ def _strip_reference_wrappers(value: str) -> str:
     return value
 
 
-def _parse_file_reference_value(value: str) -> tuple[str, int | None, int | None]:
+def _parse_file_reference_value(value: str) -> Tuple[str, Optional[int], Optional[int]]:
     quoted_match = re.match(
         r'^(?P<quote>`|"|\')(?P<path>.+?)(?P=quote)(?::(?P<start>\d+)(?:-(?P<end>\d+))?)?$',
         value,
@@ -404,8 +404,8 @@ def _parse_file_reference_value(value: str) -> tuple[str, int | None, int | None
     return _strip_reference_wrappers(value), None, None
 
 
-def _remove_reference_tokens(message: str, refs: list[ContextReference]) -> str:
-    pieces: list[str] = []
+def _remove_reference_tokens(message: str, refs: List[ContextReference]) -> str:
+    pieces: List[str] = []
     cursor = 0
     for ref in refs:
         pieces.append(message[cursor:ref.start])
@@ -443,11 +443,11 @@ def _build_folder_listing(path: Path, cwd: Path, limit: int = 200) -> str:
     return "\n".join(lines)
 
 
-def _iter_visible_entries(path: Path, cwd: Path, limit: int) -> list[Path]:
+def _iter_visible_entries(path: Path, cwd: Path, limit: int) -> List[Path]:
     rg_entries = _rg_files(path, cwd, limit=limit)
     if rg_entries is not None:
-        output: list[Path] = []
-        seen_dirs: set[Path] = set()
+        output: List[Path] = []
+        seen_dirs: Set[Path] = set()
         for rel in rg_entries:
             full = cwd / rel
             for parent in full.parents:
@@ -474,7 +474,7 @@ def _iter_visible_entries(path: Path, cwd: Path, limit: int) -> list[Path]:
     return output
 
 
-def _rg_files(path: Path, cwd: Path, limit: int) -> list[Path] | None:
+def _rg_files(path: Path, cwd: Path, limit: int) -> List[Path] | None:
     try:
         result = subprocess.run(
             ["rg", "--files", str(path.relative_to(cwd))],

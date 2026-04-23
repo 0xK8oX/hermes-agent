@@ -252,16 +252,16 @@ class WebResearchEnv(HermesAgentBaseEnv):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._items: list[dict] = []
-        self._eval_items: list[dict] = []
+        self._items: List[dict] = []
+        self._eval_items: List[dict] = []
         self._index: int = 0
 
         # Metrics tracking for wandb
-        self._reward_buffer: list[float] = []
-        self._correctness_buffer: list[float] = []
-        self._tool_usage_buffer: list[float] = []
-        self._efficiency_buffer: list[float] = []
-        self._diversity_buffer: list[float] = []
+        self._reward_buffer: List[float] = []
+        self._correctness_buffer: List[float] = []
+        self._tool_usage_buffer: List[float] = []
+        self._efficiency_buffer: List[float] = []
+        self._diversity_buffer: List[float] = []
 
     # ------------------------------------------------------------------
     # 1. Setup — load dataset
@@ -358,7 +358,7 @@ class WebResearchEnv(HermesAgentBaseEnv):
         """
         # Extract final response from messages (last assistant message with content)
         final_response = ""
-        tools_used: list[str] = []
+        tools_used: List[str] = []
         for msg in reversed(result.messages):
             if msg.get("role") == "assistant" and msg.get("content") and not final_response:
                 final_response = msg["content"]

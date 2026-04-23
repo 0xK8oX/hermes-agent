@@ -50,7 +50,7 @@ import logging
 import os
 import asyncio
 import datetime
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from tools.openrouter_client import get_async_client as _get_openrouter_client, check_api_key as check_openrouter_api_key
 from agent.auxiliary_client import extract_content_or_reasoning
 from tools.debug_helpers import DebugSession
@@ -107,7 +107,7 @@ async def _run_reference_model_safe(
     temperature: float = REFERENCE_TEMPERATURE,
     max_tokens: int = 32000,
     max_retries: int = 6
-) -> tuple[str, str, bool]:
+) -> Tuple[str, str, bool]:
     """
     Run a single reference model with retry logic and graceful failure handling.
     
@@ -119,7 +119,7 @@ async def _run_reference_model_safe(
         max_retries (int): Maximum number of retry attempts
         
     Returns:
-        tuple[str, str, bool]: (model_name, response_content_or_error, success_flag)
+        Tuple[str, str, bool]: (model_name, response_content_or_error, success_flag)
     """
     for attempt in range(max_retries):
         try:

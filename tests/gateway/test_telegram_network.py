@@ -19,6 +19,7 @@ import httpx
 import pytest
 
 from gateway.platforms import telegram_network as tnet
+from typing import List
 
 
 # ---------------------------------------------------------------------------
@@ -461,7 +462,7 @@ class FakeDoHClient:
     def __init__(self, responses: dict):
         # responses: URL prefix → (status, json_body) | Exception
         self._responses = responses
-        self.requests_made: list[dict] = []
+        self.requests_made: List[dict] = []
 
     @staticmethod
     def _make_response(status, body, url):

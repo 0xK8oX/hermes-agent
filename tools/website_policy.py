@@ -15,7 +15,7 @@ import logging
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Set
 from urllib.parse import urlparse
 
 from hermes_constants import get_hermes_home
@@ -166,7 +166,7 @@ def load_website_blocklist(config_path: Optional[Path] = None) -> Dict[str, Any]
         raise WebsitePolicyError("security.website_blocklist.enabled must be a boolean")
 
     rules: List[Dict[str, str]] = []
-    seen: set[Tuple[str, str]] = set()
+    seen: Set[Tuple[str, str]] = set()
 
     for raw_rule in raw_domains:
         normalized = _normalize_rule(raw_rule)

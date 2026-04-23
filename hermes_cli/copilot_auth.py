@@ -25,7 +25,7 @@ import shutil
 import subprocess
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple, List, Dict
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +43,7 @@ _DEVICE_CODE_POLL_INTERVAL = 5  # seconds
 _DEVICE_CODE_POLL_SAFETY_MARGIN = 3  # seconds
 
 
-def validate_copilot_token(token: str) -> tuple[bool, str]:
+def validate_copilot_token(token: str) -> Tuple[bool, str]:
     """Validate that a token is usable with the Copilot API.
 
     Returns (valid, message).
@@ -64,7 +64,7 @@ def validate_copilot_token(token: str) -> tuple[bool, str]:
     return True, "OK"
 
 
-def resolve_copilot_token() -> tuple[str, str]:
+def resolve_copilot_token() -> Tuple[str, str]:
     """Resolve a GitHub token suitable for Copilot API use.
 
     Returns (token, source) where source describes where the token came from.
@@ -95,9 +95,9 @@ def resolve_copilot_token() -> tuple[str, str]:
     return "", ""
 
 
-def _gh_cli_candidates() -> list[str]:
+def _gh_cli_candidates() -> List[str]:
     """Return candidate ``gh`` binary paths, including common Homebrew installs."""
-    candidates: list[str] = []
+    candidates: List[str] = []
 
     resolved = shutil.which("gh")
     if resolved:
@@ -281,12 +281,12 @@ def copilot_request_headers(
     *,
     is_agent_turn: bool = True,
     is_vision: bool = False,
-) -> dict[str, str]:
+) -> Dict[str, str]:
     """Build the standard headers for Copilot API requests.
 
     Replicates the header set used by opencode and the Copilot CLI.
     """
-    headers: dict[str, str] = {
+    headers: Dict[str, str] = {
         "Editor-Version": "vscode/1.104.1",
         "User-Agent": "HermesAgent/1.0",
         "Copilot-Integration-Id": "vscode-chat",

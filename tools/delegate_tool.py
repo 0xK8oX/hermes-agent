@@ -531,7 +531,7 @@ def _run_single_child(
 
         # Build tool trace from conversation messages (already in memory).
         # Uses tool_call_id to correctly pair parallel tool calls with results.
-        tool_trace: list[Dict[str, Any]] = []
+        tool_trace: List[Dict[str, Any]] = []
         trace_by_id: Dict[str, Dict[str, Any]] = {}
         messages = result.get("messages") or []
         if isinstance(messages, list):

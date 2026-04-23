@@ -5,6 +5,7 @@ import pytest
 import yaml
 
 from tools.website_policy import WebsitePolicyError, check_website_access, load_website_blocklist
+from typing import List
 
 
 def test_load_website_blocklist_merges_config_and_shared_file(tmp_path):
@@ -89,9 +90,9 @@ def test_default_config_exposes_website_blocklist_shape():
     from hermes_cli.config import DEFAULT_CONFIG
 
     website_blocklist = DEFAULT_CONFIG["security"]["website_blocklist"]
-    assert website_blocklist["enabled"] is False
-    assert website_blocklist["domains"] == []
-    assert website_blocklist["shared_files"] == []
+    assert website_blockList["enabled"] is False
+    assert website_blockList["domains"] == []
+    assert website_blockList["shared_files"] == []
 
 
 def test_load_website_blocklist_uses_enabled_default_when_section_missing(tmp_path):

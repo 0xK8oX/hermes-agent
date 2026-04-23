@@ -20,7 +20,7 @@ import logging
 import re
 import threading
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from agent.memory_provider import MemoryProvider
 from tools.registry import tool_error
@@ -209,7 +209,7 @@ class HonchoMemoryProvider(MemoryProvider):
         self._context_cadence = 1   # minimum turns between context API calls
         self._dialectic_cadence = 1  # backwards-compat fallback; wizard writes 2 on new configs
         self._dialectic_depth = 1   # how many .chat() calls per dialectic cycle (1-3)
-        self._dialectic_depth_levels: list[str] | None = None  # per-pass reasoning levels
+        self._dialectic_depth_levels: Optional[List[str]] = None  # per-pass reasoning levels
         self._reasoning_heuristic: bool = True  # scale base level by query length
         self._reasoning_level_cap: str = "high"  # ceiling for auto-selected level
         self._last_context_turn = -999
@@ -774,7 +774,7 @@ class HonchoMemoryProvider(MemoryProvider):
     # Proportional reasoning levels per depth/pass when dialecticDepthLevels
     # is not configured. The base level is dialecticReasoningLevel.
     # Index: (depth, pass) → level relative to base.
-    _PROPORTIONAL_LEVELS: dict[tuple[int, int], str] = {
+    _PROPORTIONAL_LEVELS: Dict[Tuple[int, int], str] = {
         # depth 1: single pass at base level
         (1, 0): "base",
         # depth 2: pass 0 lighter, pass 1 at base
@@ -883,7 +883,7 @@ class HonchoMemoryProvider(MemoryProvider):
             return self._apply_reasoning_heuristic(base, query)
         return mapping
 
-    def _build_dialectic_prompt(self, pass_idx: int, prior_results: list[str], is_cold: bool) -> str:
+    def _build_dialectic_prompt(self, pass_idx: int, prior_results: List[str], is_cold: bool) -> str:
         """Build the prompt for a given dialectic pass.
 
         Pass 0: cold start (general user query) or warm (session-scoped).
@@ -954,7 +954,7 @@ class HonchoMemoryProvider(MemoryProvider):
             return ""
 
         is_cold = not self._base_context_cache
-        results: list[str] = []
+        results: List[str] = []
 
         for i in range(self._dialectic_depth):
             if i == 0:
@@ -1012,7 +1012,7 @@ class HonchoMemoryProvider(MemoryProvider):
         self._turn_count = turn_number
 
     @staticmethod
-    def _chunk_message(content: str, limit: int) -> list[str]:
+    def _chunk_message(content: str, limit: int) -> List[str]:
         """Split content into chunks that fit within the Honcho message limit.
 
         Splits at paragraph boundaries when possible, falling back to

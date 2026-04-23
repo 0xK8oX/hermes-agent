@@ -6,12 +6,13 @@ from gateway.platforms.base import BasePlatformAdapter, MessageEvent, SendResult
 from gateway.restart import DEFAULT_GATEWAY_RESTART_DRAIN_TIMEOUT
 from gateway.run import GatewayRunner
 from gateway.session import SessionSource
+from typing import Tuple, List
 
 
 class RestartTestAdapter(BasePlatformAdapter):
     def __init__(self):
         super().__init__(PlatformConfig(enabled=True, token="***"), Platform.TELEGRAM)
-        self.sent: list[str] = []
+        self.sent: List[str] = []
 
     async def connect(self):
         return True
@@ -41,7 +42,7 @@ def make_restart_source(chat_id: str = "123456", chat_type: str = "dm") -> Sessi
 
 def make_restart_runner(
     adapter: BasePlatformAdapter | None = None,
-) -> tuple[GatewayRunner, BasePlatformAdapter]:
+) -> Tuple[GatewayRunner, BasePlatformAdapter]:
     runner = object.__new__(GatewayRunner)
     runner.config = GatewayConfig(
         platforms={Platform.TELEGRAM: PlatformConfig(enabled=True, token="***")}

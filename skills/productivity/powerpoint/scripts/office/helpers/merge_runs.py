@@ -11,9 +11,10 @@ Also:
 from pathlib import Path
 
 import defusedxml.minidom
+from typing import Tuple
 
 
-def merge_runs(input_dir: str) -> tuple[int, str]:
+def merge_runs(input_dir: str) -> Tuple[int, str]:
     doc_xml = Path(input_dir) / "word" / "document.xml"
 
     if not doc_xml.exists():

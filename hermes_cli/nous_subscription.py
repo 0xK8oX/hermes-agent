@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, Optional, Set
+from typing import Dict, Iterable, Optional, Set, Tuple, List
 
 from hermes_cli.auth import get_nous_auth_status
 from hermes_cli.config import get_env_value, load_config
@@ -161,7 +161,7 @@ def _resolve_browser_feature_state(
     direct_browser_use: bool,
     direct_firecrawl: bool,
     managed_browser_available: bool,
-) -> tuple[str, bool, bool, bool]:
+) -> Tuple[str, bool, bool, bool]:
     """Resolve browser availability using the same precedence as runtime."""
     if direct_camofox:
         return "camofox", True, bool(browser_tool_enabled), False
@@ -471,7 +471,7 @@ def apply_nous_managed_defaults(
     config: Dict[str, object],
     *,
     enabled_toolsets: Optional[Iterable[str]] = None,
-) -> set[str]:
+) -> Set[str]:
     if not managed_nous_tools_enabled():
         return set()
 
@@ -480,7 +480,7 @@ def apply_nous_managed_defaults(
         return set()
 
     selected_toolsets = set(enabled_toolsets or ())
-    changed: set[str] = set()
+    changed: Set[str] = set()
 
     web_cfg = config.get("web")
     if not isinstance(web_cfg, dict):
@@ -572,7 +572,7 @@ _ALL_GATEWAY_KEYS = ("web", "image_gen", "tts", "browser")
 
 def get_gateway_eligible_tools(
     config: Optional[Dict[str, object]] = None,
-) -> tuple[list[str], list[str], list[str]]:
+) -> Tuple[List[str], List[str], List[str]]:
     """Return (unconfigured, has_direct, already_managed) tool key lists.
 
     - unconfigured: tools with no direct credentials (easy switch)
@@ -607,9 +607,9 @@ def get_gateway_eligible_tools(
         "browser": bool((config.get("browser") if isinstance(config.get("browser"), dict) else {}).get("use_gateway")),
     }
 
-    unconfigured: list[str] = []
-    has_direct: list[str] = []
-    already_managed: list[str] = []
+    unconfigured: List[str] = []
+    has_direct: List[str] = []
+    already_managed: List[str] = []
     for key in _ALL_GATEWAY_KEYS:
         if opted_in.get(key):
             already_managed.append(key)
@@ -622,8 +622,8 @@ def get_gateway_eligible_tools(
 
 def apply_gateway_defaults(
     config: Dict[str, object],
-    tool_keys: list[str],
-) -> set[str]:
+    tool_keys: List[str],
+) -> Set[str]:
     """Apply Tool Gateway config for the given tool keys.
 
     Sets ``use_gateway: true`` in each tool's config section so the
@@ -631,7 +631,7 @@ def apply_gateway_defaults(
 
     Returns the set of tools that were actually changed.
     """
-    changed: set[str] = set()
+    changed: Set[str] = set()
 
     web_cfg = config.get("web")
     if not isinstance(web_cfg, dict):
@@ -674,7 +674,7 @@ def apply_gateway_defaults(
     return changed
 
 
-def prompt_enable_tool_gateway(config: Dict[str, object]) -> set[str]:
+def prompt_enable_tool_gateway(config: Dict[str, object]) -> Set[str]:
     """If eligible tools exist, prompt the user to enable the Tool Gateway.
 
     Uses prompt_choice() with a description parameter so the curses TUI
@@ -693,7 +693,7 @@ def prompt_enable_tool_gateway(config: Dict[str, object]) -> set[str]:
         return set()
 
     # Build description lines showing full status of all gateway tools
-    desc_parts: list[str] = [
+    desc_parts: List[str] = [
         "",
         "  The Tool Gateway gives you access to web search, image generation,",
         "  text-to-speech, and browser automation through your Nous subscription.",
@@ -711,8 +711,8 @@ def prompt_enable_tool_gateway(config: Dict[str, object]) -> set[str]:
             desc_parts.append(f"  ○ {_GATEWAY_TOOL_LABELS[k]} — using {_GATEWAY_DIRECT_LABELS[k]}")
 
     # Build short choice labels — detail is in the description above
-    choices: list[str] = []
-    choice_keys: list[str] = []  # maps choice index -> action
+    choices: List[str] = []
+    choice_keys: List[str] = []  # maps choice index -> action
 
     if unconfigured and has_direct:
         choices.append("Enable for all tools (existing keys kept, not used)")

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import math
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional, List, Dict, Set
 
 if TYPE_CHECKING:
     from .store import MemoryStore
@@ -48,10 +48,10 @@ class FactRetriever:
     def search(
         self,
         query: str,
-        category: str | None = None,
+        category: Optional[str] = None,
         min_trust: float = 0.3,
         limit: int = 10,
-    ) -> list[dict]:
+    ) -> List[dict]:
         """Hybrid search: FTS5 candidates → Jaccard rerank → trust weighting.
 
         Pipeline:
@@ -114,9 +114,9 @@ class FactRetriever:
     def probe(
         self,
         entity: str,
-        category: str | None = None,
+        category: Optional[str] = None,
         limit: int = 10,
-    ) -> list[dict]:
+    ) -> List[dict]:
         """Compositional entity query using HRR algebra.
 
         Unbinds entity from memory bank to extract associated content.
@@ -192,9 +192,9 @@ class FactRetriever:
     def related(
         self,
         entity: str,
-        category: str | None = None,
+        category: Optional[str] = None,
         limit: int = 10,
-    ) -> list[dict]:
+    ) -> List[dict]:
         """Discover facts that share structural connections with an entity.
 
         Unlike probe (which finds facts *about* an entity), related finds
@@ -259,10 +259,10 @@ class FactRetriever:
 
     def reason(
         self,
-        entities: list[str],
-        category: str | None = None,
+        entities: List[str],
+        category: Optional[str] = None,
         limit: int = 10,
-    ) -> list[dict]:
+    ) -> List[dict]:
         """Multi-entity compositional query — vector-space JOIN.
 
         Given multiple entities, algebraically intersects their structural
@@ -337,10 +337,10 @@ class FactRetriever:
 
     def contradict(
         self,
-        category: str | None = None,
+        category: Optional[str] = None,
         threshold: float = 0.3,
         limit: int = 10,
-    ) -> list[dict]:
+    ) -> List[dict]:
         """Find potentially contradictory facts via entity overlap + content divergence.
 
         Two facts contradict when they share entities (same subject) but have
@@ -384,7 +384,7 @@ class FactRetriever:
             rows = rows[:_MAX_CONTRADICT_FACTS]
 
         # Build entity sets per fact
-        fact_entities: dict[int, set[str]] = {}
+        fact_entities: Dict[int, Set[str]] = {}
         for row in rows:
             fid = row["fact_id"]
             entity_rows = conn.execute(
@@ -444,9 +444,9 @@ class FactRetriever:
     def _score_facts_by_vector(
         self,
         target_vec: "np.ndarray",
-        category: str | None = None,
+        category: Optional[str] = None,
         limit: int = 10,
-    ) -> list[dict]:
+    ) -> List[dict]:
         """Score facts by similarity to a target vector."""
         conn = self.store._conn
 
@@ -481,10 +481,10 @@ class FactRetriever:
     def _fts_candidates(
         self,
         query: str,
-        category: str | None,
+        category: Optional[str],
         min_trust: float,
         limit: int,
-    ) -> list[dict]:
+    ) -> List[dict]:
         """Get raw FTS5 candidates from the store.
 
         Uses the store's database connection directly for FTS5 MATCH
@@ -542,7 +542,7 @@ class FactRetriever:
         return results
 
     @staticmethod
-    def _tokenize(text: str) -> set[str]:
+    def _tokenize(text: str) -> Set[str]:
         """Simple whitespace tokenization with lowercasing.
 
         Strips common punctuation. No stemming/lemmatization (Phase 1).
@@ -566,7 +566,7 @@ class FactRetriever:
         union = len(set_a | set_b)
         return intersection / union if union > 0 else 0.0
 
-    def _temporal_decay(self, timestamp_str: str | None) -> float:
+    def _temporal_decay(self, timestamp_str: Optional[str]) -> float:
         """Exponential decay: 0.5^(age_days / half_life_days).
 
         Returns 1.0 if decay is disabled or timestamp is missing.

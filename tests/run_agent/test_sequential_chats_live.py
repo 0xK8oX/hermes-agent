@@ -21,6 +21,7 @@ import os
 from pathlib import Path
 
 import pytest
+from typing import Tuple
 
 
 # Load ~/.hermes/.env so live runs pick up OPENROUTER_API_KEY without
@@ -73,7 +74,7 @@ def _make_live_agent():
     )
 
 
-def _looks_like_error_reply(reply: str) -> tuple[bool, str]:
+def _looks_like_error_reply(reply: str) -> Tuple[bool, str]:
     """AIAgent returns an error-sentinel string (not an exception) when the
     underlying API call fails past retries. A naive ``assert reply and
     reply.strip()`` misses this because the sentinel is truthy. This

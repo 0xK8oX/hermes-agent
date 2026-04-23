@@ -23,6 +23,7 @@ import hashlib
 import logging
 import struct
 import math
+from typing import List
 
 try:
     import numpy as np
@@ -58,7 +59,7 @@ def encode_atom(word: str, dim: int = 1024) -> "np.ndarray":
     values_per_block = 16
     blocks_needed = math.ceil(dim / values_per_block)
 
-    uint16_values: list[int] = []
+    uint16_values: List[int] = []
     for i in range(blocks_needed):
         digest = hashlib.sha256(f"{word}:{i}".encode()).digest()
         uint16_values.extend(struct.unpack("<16H", digest))
@@ -132,7 +133,7 @@ def encode_text(text: str, dim: int = 1024) -> "np.ndarray":
     return bundle(*atom_vectors)
 
 
-def encode_fact(content: str, entities: list[str], dim: int = 1024) -> "np.ndarray":
+def encode_fact(content: str, entities: List[str], dim: int = 1024) -> "np.ndarray":
     """Structured encoding: content bound to ROLE_CONTENT, each entity bound to ROLE_ENTITY, all bundled.
 
     Role vectors are reserved atoms: "__hrr_role_content__", "__hrr_role_entity__"
@@ -150,7 +151,7 @@ def encode_fact(content: str, entities: list[str], dim: int = 1024) -> "np.ndarr
     role_content = encode_atom("__hrr_role_content__", dim)
     role_entity = encode_atom("__hrr_role_entity__", dim)
 
-    components: list[np.ndarray] = [
+    components: List[np.ndarray] = [
         bind(encode_text(content, dim), role_content)
     ]
 

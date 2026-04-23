@@ -7,6 +7,8 @@ from unittest.mock import patch, MagicMock
 import httpx
 import pytest
 
+from typing import List
+
 from tools.skills_hub import (
     GitHubAuth,
     GitHubSource,

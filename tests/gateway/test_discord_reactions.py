@@ -41,6 +41,7 @@ def _ensure_discord_mock():
 _ensure_discord_mock()
 
 from gateway.platforms.discord import DiscordAdapter  # noqa: E402
+from typing import List
 
 
 class FakeTree:
@@ -105,9 +106,9 @@ async def test_process_message_background_adds_and_swaps_reactions(adapter):
     event = _make_event("1", raw_message)
     await adapter._process_message_background(event, build_session_key(event.source))
 
-    assert raw_message.add_reaction.await_args_list[0].args == ("👀",)
-    assert raw_message.remove_reaction.await_args_list[0].args == ("👀", adapter._client.user)
-    assert raw_message.add_reaction.await_args_list[1].args == ("✅",)
+    assert raw_message.add_reaction.await_args_List[0].args == ("👀",)
+    assert raw_message.remove_reaction.await_args_List[0].args == ("👀", adapter._client.user)
+    assert raw_message.add_reaction.await_args_List[1].args == ("✅",)
 
 
 @pytest.mark.asyncio

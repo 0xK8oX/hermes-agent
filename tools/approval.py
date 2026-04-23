@@ -16,7 +16,7 @@ import sys
 import threading
 import time
 import unicodedata
-from typing import Optional
+from typing import Optional, Dict, Set
 
 logger = logging.getLogger(__name__)
 
@@ -144,7 +144,7 @@ def _legacy_pattern_key(pattern: str) -> str:
     return pattern.split(r'\b')[1] if r'\b' in pattern else pattern[:20]
 
 
-_PATTERN_KEY_ALIASES: dict[str, set[str]] = {}
+_PATTERN_KEY_ALIASES: Dict[str, Set[str]] = {}
 for _pattern, _description in DANGEROUS_PATTERNS:
     _legacy_key = _legacy_pattern_key(_pattern)
     _canonical_key = _description
@@ -152,7 +152,7 @@ for _pattern, _description in DANGEROUS_PATTERNS:
     _PATTERN_KEY_ALIASES.setdefault(_legacy_key, set()).update({_legacy_key, _canonical_key})
 
 
-def _approval_key_aliases(pattern_key: str) -> set[str]:
+def _approval_key_aliases(pattern_key: str) -> Set[str]:
     """Return all approval keys that should match this pattern.
 
     New approvals use the human-readable description string, but older
@@ -203,9 +203,9 @@ def detect_dangerous_command(command: str) -> tuple:
 # =========================================================================
 
 _lock = threading.Lock()
-_pending: dict[str, dict] = {}
-_session_approved: dict[str, set] = {}
-_session_yolo: set[str] = set()
+_pending: Dict[str, dict] = {}
+_session_approved: Dict[str, set] = {}
+_session_yolo: Set[str] = set()
 _permanent_approved: set = set()
 
 # =========================================================================
@@ -227,8 +227,8 @@ class _ApprovalEntry:
         self.result: Optional[str] = None  # "once"|"session"|"always"|"deny"
 
 
-_gateway_queues: dict[str, list] = {}        # session_key → [_ApprovalEntry, …]
-_gateway_notify_cbs: dict[str, object] = {}  # session_key → callable(approval_data)
+_gateway_queues: Dict[str, list] = {}        # session_key → [_ApprovalEntry, …]
+_gateway_notify_cbs: Dict[str, object] = {}  # session_key → callable(approval_data)
 
 
 def register_gateway_notify(session_key: str, cb) -> None:
@@ -408,7 +408,7 @@ def save_permanent_allowlist(patterns: set):
 # =========================================================================
 
 def prompt_dangerous_approval(command: str, description: str,
-                              timeout_seconds: int | None = None,
+                              timeout_seconds: Optional[int] = None,
                               allow_permanent: bool = True,
                               approval_callback=None) -> str:
     """Prompt the user to approve a dangerous command (CLI only).

@@ -1866,6 +1866,25 @@ def resolve_provider_client(
 
     if pconfig.auth_type == "api_key":
         if provider == "anthropic":
+            # If explicit_base_url is provided (e.g., for fallback to MiniMax/Kimi),
+            # build Anthropic client directly instead of using _try_anthropic()
+            # which only reads from config.yaml or credential pool.
+            if explicit_base_url:
+                try:
+                    from agent.anthropic_adapter import build_anthropic_client
+                    token = (explicit_api_key or "").strip() or "no-key-required"
+                    base = explicit_base_url.strip().rstrip("/")
+                    final_model = _normalize_resolved_model(model or _API_KEY_PROVIDER_AUX_MODELS.get("anthropic", "claude-haiku-4-5-20251001"), provider)
+                    client = build_anthropic_client(token, base)
+                    # Wrap in AnthropicAuxiliaryClient for consistency
+                    from agent.anthropic_adapter import _is_oauth_token
+                    from agent.auxiliary_client import AnthropicAuxiliaryClient
+                    is_oauth = _is_oauth_token(token)
+                    client = AnthropicAuxiliaryClient(client, final_model, token, base, is_oauth=is_oauth)
+                    return (_to_async_client(client, final_model) if async_mode else (client, final_model))
+                except Exception as e:
+                    logger.warning("resolve_provider_client: failed to build Anthropic client with explicit_base_url: %s", e)
+                    # Fall through to _try_anthropic() below
             client, default_model = _try_anthropic()
             if client is None:
                 logger.warning("resolve_provider_client: anthropic requested but no Anthropic credentials found")
@@ -2923,7 +2942,7 @@ def extract_content_or_reasoning(response) -> str:
             return cleaned
 
     # Content is empty or reasoning-only — try structured reasoning fields
-    reasoning_parts: list[str] = []
+    reasoning_parts: List[str] = []
     for field in ("reasoning", "reasoning_content"):
         val = getattr(msg, field, None)
         if val and isinstance(val, str) and val.strip() and val not in reasoning_parts:

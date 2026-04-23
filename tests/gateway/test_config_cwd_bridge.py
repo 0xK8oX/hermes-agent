@@ -12,9 +12,10 @@ asserting the expected env var outcomes.
 import os
 import json
 import pytest
+from typing import Optional
 
 
-def _simulate_config_bridge(cfg: dict, initial_env: dict | None = None):
+def _simulate_config_bridge(cfg: dict, initial_env: Optional[dict] = None):
     """Simulate the gateway config bridge logic from gateway/run.py.
 
     Returns the resulting env dict (only TERMINAL_* and MESSAGING_CWD keys).

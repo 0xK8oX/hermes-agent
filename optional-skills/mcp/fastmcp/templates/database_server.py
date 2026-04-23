@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import re
 import sqlite3
-from typing import Any
+from typing import Any, List, Dict
 
 from fastmcp import FastMCP
 
@@ -32,7 +32,7 @@ def _validate_table_name(table_name: str) -> str:
 
 
 @mcp.tool
-def list_tables() -> list[str]:
+def list_tables() -> List[str]:
     """List user-defined SQLite tables."""
     with _connect() as conn:
         rows = conn.execute(
@@ -42,7 +42,7 @@ def list_tables() -> list[str]:
 
 
 @mcp.tool
-def describe_table(table_name: str) -> list[dict[str, Any]]:
+def describe_table(table_name: str) -> List[Dict[str, Any]]:
     """Describe columns for a SQLite table."""
     safe_table_name = _validate_table_name(table_name)
     with _connect() as conn:
@@ -61,7 +61,7 @@ def describe_table(table_name: str) -> list[dict[str, Any]]:
 
 
 @mcp.tool
-def query(sql: str, limit: int = 50) -> dict[str, Any]:
+def query(sql: str, limit: int = 50) -> Dict[str, Any]:
     """Run a read-only SELECT query and return rows plus column names."""
     _reject_mutation(sql)
     safe_limit = max(0, min(limit, MAX_ROWS))

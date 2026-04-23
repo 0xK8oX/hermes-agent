@@ -15,6 +15,7 @@ Usage:
 """
 import sys
 import os
+from typing import Dict
 
 def convert(path, output_dir=None, output_format="markdown", use_llm=False):
     from marker.converters.pdf import PdfConverter

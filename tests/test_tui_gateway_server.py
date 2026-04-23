@@ -7,11 +7,12 @@ from pathlib import Path
 from unittest.mock import patch
 
 from tui_gateway import server
+from typing import List
 
 
 class _ChunkyStdout:
     def __init__(self):
-        self.parts: list[str] = []
+        self.parts: List[str] = []
 
     def write(self, text: str) -> int:
         for ch in text:
@@ -644,7 +645,7 @@ def test_prompt_submit_history_version_mismatch_surfaces_warning(monkeypatch):
 
     server._sessions["sid"] = _session(agent=_RacyAgent())
     session_ref["s"] = server._sessions["sid"]
-    emits: list[tuple] = []
+    emits: List[tuple] = []
     try:
         monkeypatch.setattr(server.threading, "Thread", _ImmediateThread)
         monkeypatch.setattr(server, "_get_usage", lambda _a: {})
@@ -688,7 +689,7 @@ def test_prompt_submit_history_version_match_persists_normally(monkeypatch):
             self._target()
 
     server._sessions["sid"] = _session(agent=_Agent())
-    emits: list[tuple] = []
+    emits: List[tuple] = []
     try:
         monkeypatch.setattr(server.threading, "Thread", _ImmediateThread)
         monkeypatch.setattr(server, "_get_usage", lambda _a: {})
@@ -966,8 +967,8 @@ def test_session_create_close_race_does_not_orphan_worker(monkeypatch):
     notify callback lingers in the global registry."""
     import threading
 
-    closed_workers: list[str] = []
-    unregistered_keys: list[str] = []
+    closed_workers: List[str] = []
+    unregistered_keys: List[str] = []
 
     class _FakeWorker:
         def __init__(self, key, model):
@@ -1054,8 +1055,8 @@ def test_session_create_no_race_keeps_worker_alive(monkeypatch):
     """Regression guard: when session.close does NOT race, the build
     thread must install the worker + notify normally and leave them
     alone (no over-eager cleanup)."""
-    closed_workers: list[str] = []
-    unregistered_keys: list[str] = []
+    closed_workers: List[str] = []
+    unregistered_keys: List[str] = []
 
     class _FakeWorker:
         def __init__(self, key, model):

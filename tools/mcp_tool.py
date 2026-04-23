@@ -80,7 +80,7 @@ import re
 import shutil
 import threading
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple, Set
 
 logger = logging.getLogger(__name__)
 
@@ -285,7 +285,7 @@ def _prepend_path(env: dict, directory: str) -> dict:
     return updated
 
 
-def _resolve_stdio_command(command: str, env: dict) -> tuple[str, dict]:
+def _resolve_stdio_command(command: str, env: dict) -> Tuple[str, dict]:
     """Resolve a stdio MCP command against the exact subprocess environment.
 
     This primarily exists to make bare ``npx``/``npm``/``node`` commands work
@@ -805,7 +805,7 @@ class MCPServerTask:
         self._error: Optional[Exception] = None
         self._config: dict = {}
         self._sampling: Optional[SamplingHandler] = None
-        self._registered_tool_names: list[str] = []
+        self._registered_tool_names: List[str] = []
         self._auth_type: str = ""
         self._refresh_lock = asyncio.Lock()
 
@@ -1953,7 +1953,7 @@ def _make_check_fn(server_name: str):
 # Discovery & registration
 # ---------------------------------------------------------------------------
 
-def _normalize_mcp_input_schema(schema: dict | None) -> dict:
+def _normalize_mcp_input_schema(schema: Optional[dict]) -> dict:
     """Normalize MCP input schemas for LLM tool-calling compatibility."""
     if not schema:
         return {"type": "object", "properties": {}}
@@ -2067,7 +2067,7 @@ def _build_utility_schemas(server_name: str) -> List[dict]:
     ]
 
 
-def _normalize_name_filter(value: Any, label: str) -> set[str]:
+def _normalize_name_filter(value: Any, label: str) -> Set[str]:
     """Normalize include/exclude config to a set of tool names."""
     if value is None:
         return set()

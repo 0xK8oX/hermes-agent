@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, List, Dict
 
 from fastmcp import FastMCP
 
@@ -20,7 +20,7 @@ def _read_text(path: str) -> str:
 
 
 @mcp.tool
-def summarize_text_file(path: str, preview_chars: int = 1200) -> dict[str, int | str]:
+def summarize_text_file(path: str, preview_chars: int = 1200) -> Dict[str, int | str]:
     """Return basic metadata and a preview for a UTF-8 text file."""
     file_path = Path(path).expanduser()
     text = _read_text(path)
@@ -33,10 +33,10 @@ def summarize_text_file(path: str, preview_chars: int = 1200) -> dict[str, int |
 
 
 @mcp.tool
-def search_text_file(path: str, needle: str, max_matches: int = 20) -> dict[str, Any]:
+def search_text_file(path: str, needle: str, max_matches: int = 20) -> Dict[str, Any]:
     """Find matching lines in a UTF-8 text file."""
     file_path = Path(path).expanduser()
-    matches: list[dict[str, Any]] = []
+    matches: List[Dict[str, Any]] = []
     for line_number, line in enumerate(_read_text(path).splitlines(), start=1):
         if needle.lower() in line.lower():
             matches.append({"line_number": line_number, "line": line})

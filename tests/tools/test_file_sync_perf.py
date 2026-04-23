@@ -11,6 +11,7 @@ import statistics
 import time
 
 import pytest
+from typing import List
 
 # ---------------------------------------------------------------------------
 # Backend fixtures
@@ -41,7 +42,7 @@ def ssh_env():
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _time_executions(env, command: str, n: int = 10) -> list[float]:
+def _time_executions(env, command: str, n: int = 10) -> List[float]:
     """Run *command* n times and return per-call wall-clock durations."""
     durations = []
     for _ in range(n):
@@ -54,7 +55,7 @@ def _time_executions(env, command: str, n: int = 10) -> list[float]:
     return durations
 
 
-def _report(label: str, durations: list[float]):
+def _report(label: str, durations: List[float]):
     """Print timing stats."""
     med = statistics.median(durations)
     mean = statistics.mean(durations)

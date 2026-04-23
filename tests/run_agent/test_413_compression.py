@@ -20,6 +20,7 @@ import pytest
 from agent.context_compressor import SUMMARY_PREFIX
 from run_agent import AIAgent
 import run_agent
+from typing import List
 
 
 # ---------------------------------------------------------------------------
@@ -453,7 +454,7 @@ class TestPreflightCompression:
         # large sessions, breaking when no further reduction is possible).
         # First pass must have received the full oversized history.
         assert mock_compress.call_count >= 1, "Preflight compression never ran"
-        first_call_messages = mock_compress.call_args_list[0].args[0]
+        first_call_messages = mock_compress.call_args_List[0].args[0]
         assert len(first_call_messages) >= 40, (
             f"First preflight pass should see the full history, got "
             f"{len(first_call_messages)} messages"

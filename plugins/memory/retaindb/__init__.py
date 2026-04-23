@@ -30,7 +30,7 @@ import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from urllib.parse import quote
 
 from agent.memory_provider import MemoryProvider
@@ -281,7 +281,7 @@ class _Client:
 
     # ── Files ─────────────────────────────────────────────────────────────────
 
-    def upload_file(self, data: bytes, filename: str, remote_path: str, mime_type: str, scope: str, project_id: str | None) -> dict:
+    def upload_file(self, data: bytes, filename: str, remote_path: str, mime_type: str, scope: str, project_id: Optional[str]) -> dict:
         import io
         import requests
         url = f"{self.base_url}/v1/files"
@@ -294,7 +294,7 @@ class _Client:
         resp.raise_for_status()
         return resp.json()
 
-    def list_files(self, prefix: str | None = None, limit: int = 50) -> dict:
+    def list_files(self, prefix: Optional[str] = None, limit: int = 50) -> dict:
         params: dict = {"limit": limit}
         if prefix:
             params["prefix"] = prefix
@@ -311,7 +311,7 @@ class _Client:
         resp.raise_for_status()
         return resp.content
 
-    def ingest_file(self, file_id: str, user_id: str | None = None, agent_id: str | None = None) -> dict:
+    def ingest_file(self, file_id: str, user_id: Optional[str] = None, agent_id: Optional[str] = None) -> dict:
         body: dict = {}
         if user_id:
             body["user_id"] = user_id
@@ -411,15 +411,15 @@ class _WriteQueue:
 # Overlay formatter
 # ---------------------------------------------------------------------------
 
-def _build_overlay(profile: dict, query_result: dict, local_entries: list[str] | None = None) -> str:
+def _build_overlay(profile: dict, query_result: dict, local_entries: Optional[List[str]] = None) -> str:
     def _compact(s: str) -> str:
         return re.sub(r"\s+", " ", str(s or "")).strip()[:320]
 
     def _norm(s: str) -> str:
         return re.sub(r"[^a-z0-9 ]", "", _compact(s).lower())
 
-    seen: list[str] = [_norm(e) for e in (local_entries or []) if _norm(e)]
-    profile_items: list[str] = []
+    seen: List[str] = [_norm(e) for e in (local_entries or []) if _norm(e)]
+    profile_items: List[str] = []
     for m in list((profile or {}).get("memories") or [])[:5]:
         c = _compact((m or {}).get("content") or "")
         n = _norm(c)
@@ -427,7 +427,7 @@ def _build_overlay(profile: dict, query_result: dict, local_entries: list[str] |
             seen.append(n)
             profile_items.append(c)
 
-    query_items: list[str] = []
+    query_items: List[str] = []
     for r in list((query_result or {}).get("results") or [])[:5]:
         c = _compact((r or {}).get("content") or "")
         n = _norm(c)
@@ -466,7 +466,7 @@ class RetainDBMemoryProvider(MemoryProvider):
         self._agent_model: dict = {}
 
         # Prefetch thread tracking — prevents accumulation on rapid calls
-        self._prefetch_threads: list[threading.Thread] = []
+        self._prefetch_threads: List[threading.Thread] = []
 
     # ── Core identity ──────────────────────────────────────────────────────
 
@@ -604,13 +604,13 @@ class RetainDBMemoryProvider(MemoryProvider):
             self._dialectic_result = ""
             self._agent_model = {}
 
-        parts: list[str] = []
+        parts: List[str] = []
         if context:
             parts.append(context)
         if dialectic:
             parts.append(f"[RetainDB User Synthesis]\n{dialectic}")
         if agent_model and agent_model.get("memory_count", 0) > 0:
-            model_lines: list[str] = []
+            model_lines: List[str] = []
             if agent_model.get("persona"):
                 model_lines.append(f"Persona: {agent_model['persona']}")
             if agent_model.get("persistent_instructions"):

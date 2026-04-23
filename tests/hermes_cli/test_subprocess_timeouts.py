@@ -3,6 +3,7 @@ import ast
 from pathlib import Path
 
 import pytest
+from typing import List
 
 
 # Parameterise over every CLI module that calls subprocess.run
@@ -14,7 +15,7 @@ _CLI_MODULES = [
 ]
 
 
-def _subprocess_run_calls(filepath: str) -> list[dict]:
+def _subprocess_run_calls(filepath: str) -> List[dict]:
     """Parse a Python file and return info about subprocess.run() calls."""
     source = Path(filepath).read_text()
     tree = ast.parse(source, filename=filepath)

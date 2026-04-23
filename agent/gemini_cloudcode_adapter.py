@@ -34,7 +34,7 @@ import os
 import time
 import uuid
 from types import SimpleNamespace
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 import httpx
 
@@ -134,7 +134,7 @@ def _translate_tool_result_to_gemini(message: Dict[str, Any]) -> Dict[str, Any]:
 
 def _build_gemini_contents(
     messages: List[Dict[str, Any]],
-) -> tuple[List[Dict[str, Any]], Optional[Dict[str, Any]]]:
+) -> Tuple[List[Dict[str, Any]], Optional[Dict[str, Any]]]:
     """Convert OpenAI messages[] to Gemini contents[] + systemInstruction."""
     system_text_parts: List[str] = []
     contents: List[Dict[str, Any]] = []

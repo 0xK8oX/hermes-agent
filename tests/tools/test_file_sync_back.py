@@ -12,6 +12,8 @@ from unittest.mock import MagicMock, call, patch
 
 import pytest
 
+from typing import Tuple, List, Dict
+
 from tools.environments.file_sync import (
     FileSyncManager,
     _sha256_file,
@@ -24,7 +26,7 @@ from tools.environments.file_sync import (
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _make_tar(files: dict[str, bytes], dest: Path):
+def _make_tar(files: Dict[str, bytes], dest: Path):
     """Write a tar archive containing the given arcname->content pairs."""
     with tarfile.open(dest, "w") as tar:
         for arcname, content in files.items():
@@ -33,7 +35,7 @@ def _make_tar(files: dict[str, bytes], dest: Path):
             tar.addfile(info, io.BytesIO(content))
 
 
-def _make_download_fn(files: dict[str, bytes]):
+def _make_download_fn(files: Dict[str, bytes]):
     """Return a bulk_download_fn that writes a tar of the given files."""
     def download(dest: Path):
         _make_tar(files, dest)
@@ -55,7 +57,7 @@ def _write_file(path: Path, content: bytes) -> str:
 
 def _make_manager(
     tmp_path: Path,
-    file_mapping: list[tuple[str, str]] | None = None,
+    file_mapping: List[Tuple[str, str]] | None = None,
     bulk_download_fn=None,
     seed_pushed_state: bool = True,
 ) -> FileSyncManager:

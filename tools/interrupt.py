@@ -17,6 +17,8 @@ Usage in tools:
 import logging
 import os
 import threading
+from typing import Optional, Set
+from typing import Optional, Set
 
 logger = logging.getLogger(__name__)
 
@@ -32,11 +34,11 @@ if _DEBUG_INTERRUPT:
     logger.setLevel(logging.INFO)
 
 # Set of thread idents that have been interrupted.
-_interrupted_threads: set[int] = set()
+_interrupted_threads: Set[int] = set()
 _lock = threading.Lock()
 
 
-def set_interrupt(active: bool, thread_id: int | None = None) -> None:
+def set_interrupt(active: bool, thread_id: Optional[int] = None) -> None:
     """Set or clear interrupt for a specific thread.
 
     Args:
@@ -90,7 +92,7 @@ class _ThreadAwareEventProxy:
     def clear(self) -> None:
         set_interrupt(False)
 
-    def wait(self, timeout: float | None = None) -> bool:
+    def wait(self, timeout: Optional[float] = None) -> bool:
         """Not truly supported — returns current state immediately."""
         return self.is_set()
 

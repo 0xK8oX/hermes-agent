@@ -9,6 +9,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from typing import List, Dict
 
 
 # ---------------------------------------------------------------------------
@@ -239,7 +240,7 @@ class TestBackup:
 # ---------------------------------------------------------------------------
 
 class TestValidateBackupZip:
-    def _make_zip(self, zip_path: Path, filenames: list[str]) -> None:
+    def _make_zip(self, zip_path: Path, filenames: List[str]) -> None:
         with zipfile.ZipFile(zip_path, "w") as zf:
             for name in filenames:
                 zf.writestr(name, "dummy")
@@ -277,7 +278,7 @@ class TestValidateBackupZip:
 # ---------------------------------------------------------------------------
 
 class TestImport:
-    def _make_backup_zip(self, zip_path: Path, files: dict[str, str | bytes]) -> None:
+    def _make_backup_zip(self, zip_path: Path, files: Dict[str, str | bytes]) -> None:
         """Create a test zip with given files."""
         with zipfile.ZipFile(zip_path, "w") as zf:
             for name, content in files.items():
@@ -753,7 +754,7 @@ class TestBackupEdgeCases:
 
 
 class TestImportEdgeCases:
-    def _make_backup_zip(self, zip_path: Path, files: dict[str, str | bytes]) -> None:
+    def _make_backup_zip(self, zip_path: Path, files: Dict[str, str | bytes]) -> None:
         with zipfile.ZipFile(zip_path, "w") as zf:
             for name, content in files.items():
                 zf.writestr(name, content)
@@ -866,7 +867,7 @@ class TestImportEdgeCases:
 # ---------------------------------------------------------------------------
 
 class TestProfileRestoration:
-    def _make_backup_zip(self, zip_path: Path, files: dict[str, str | bytes]) -> None:
+    def _make_backup_zip(self, zip_path: Path, files: Dict[str, str | bytes]) -> None:
         with zipfile.ZipFile(zip_path, "w") as zf:
             for name, content in files.items():
                 zf.writestr(name, content)

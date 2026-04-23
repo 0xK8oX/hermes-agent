@@ -121,6 +121,7 @@ from gateway.platforms.discord import DiscordAdapter  # noqa: E402
 import gateway.platforms.slack as _slack_mod  # noqa: E402
 _slack_mod.SLACK_AVAILABLE = True
 from gateway.platforms.slack import SlackAdapter  # noqa: E402
+from typing import Optional
 
 
 # Platform-generic factories
@@ -353,7 +354,7 @@ def make_discord_message(
     )
 
 
-def get_response_text(adapter) -> str | None:
+def get_response_text(adapter) -> Optional[str]:
     """Extract the response text from adapter.send() call args, or None if not called."""
     if not adapter.send.called:
         return None

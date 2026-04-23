@@ -15,6 +15,7 @@ import os
 import threading
 import time
 from unittest.mock import patch
+from typing import List
 
 
 def _clear_approval_state():
@@ -73,7 +74,7 @@ class TestApprovalHeartbeat:
         # so we can resolve as soon as the first heartbeat fires — avoids
         # flakiness from fixed sleeps racing against thread startup.
         first_heartbeat = threading.Event()
-        heartbeat_calls: list[str] = []
+        heartbeat_calls: List[str] = []
 
         def _fake_touch(state, label):
             # Bypass the 10s throttle so the heartbeat fires every loop

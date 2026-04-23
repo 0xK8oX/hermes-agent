@@ -14,6 +14,7 @@ from difflib import unified_diff
 from pathlib import Path
 
 from utils import safe_json_loads
+from typing import Optional, Tuple, List, Dict
 
 # ANSI escape codes for coloring tool failure indicators
 _RED = "\033[31m"
@@ -26,10 +27,10 @@ _ANSI_RESET = "\033[0m"
 # Diff colors — resolved lazily from the skin engine so they adapt
 # to light/dark themes.  Falls back to sensible defaults on import
 # failure.  We cache after first resolution for performance.
-_diff_colors_cached: dict[str, str] | None = None
+_diff_colors_cached: Dict[str, str] | None = None
 
 
-def _diff_ansi() -> dict[str, str]:
+def _diff_ansi() -> Dict[str, str]:
     """Return ANSI escapes for diff display, resolved from the active skin."""
     global _diff_colors_cached
     if _diff_colors_cached is not None:
@@ -46,7 +47,7 @@ def _diff_ansi() -> dict[str, str]:
         from hermes_cli.skin_engine import get_active_skin
         skin = get_active_skin()
 
-        def _hex_fg(key: str, fallback_rgb: tuple[int, int, int]) -> str:
+        def _hex_fg(key: str, fallback_rgb: Tuple[int, int, int]) -> str:
             h = skin.get_color(key, "")
             if h and len(h) == 7 and h[0] == "#":
                 r, g, b = int(h[1:3], 16), int(h[3:5], 16), int(h[5:7], 16)
@@ -90,8 +91,8 @@ _MAX_INLINE_DIFF_LINES = 80
 @dataclass
 class LocalEditSnapshot:
     """Pre-tool filesystem snapshot used to render diffs locally after writes."""
-    paths: list[Path] = field(default_factory=list)
-    before: dict[str, str | None] = field(default_factory=dict)
+    paths: List[Path] = field(default_factory=list)
+    before: Dict[str, Optional[str]] = field(default_factory=dict)
 
 # =========================================================================
 # Configurable tool preview length (0 = no limit)
@@ -167,7 +168,7 @@ def _oneline(text: str) -> str:
     return " ".join(text.split())
 
 
-def build_tool_preview(tool_name: str, args: dict, max_len: int | None = None) -> str | None:
+def build_tool_preview(tool_name: str, args: dict, max_len: Optional[int] = None) -> Optional[str]:
     """Build a short preview of a tool call's primary argument for display.
 
     *max_len* controls truncation.  ``None`` (default) defers to the global
@@ -288,7 +289,7 @@ def _resolved_path(path: str) -> Path:
     return Path.cwd() / candidate
 
 
-def _snapshot_text(path: Path) -> str | None:
+def _snapshot_text(path: Path) -> Optional[str]:
     """Return UTF-8 file content, or None for missing/unreadable files."""
     try:
         return path.read_text(encoding="utf-8")
@@ -304,7 +305,7 @@ def _display_diff_path(path: Path) -> str:
         return str(path)
 
 
-def _resolve_skill_manage_paths(args: dict) -> list[Path]:
+def _resolve_skill_manage_paths(args: dict) -> List[Path]:
     """Resolve skill_manage write targets to filesystem paths."""
     action = args.get("action")
     name = args.get("name")
@@ -334,7 +335,7 @@ def _resolve_skill_manage_paths(args: dict) -> list[Path]:
     return []
 
 
-def _resolve_local_edit_paths(tool_name: str, function_args: dict | None) -> list[Path]:
+def _resolve_local_edit_paths(tool_name: str, function_args: Optional[dict]) -> List[Path]:
     """Resolve local filesystem targets for write-capable tools."""
     if not isinstance(function_args, dict):
         return []
@@ -353,7 +354,7 @@ def _resolve_local_edit_paths(tool_name: str, function_args: dict | None) -> lis
     return []
 
 
-def capture_local_edit_snapshot(tool_name: str, function_args: dict | None) -> LocalEditSnapshot | None:
+def capture_local_edit_snapshot(tool_name: str, function_args: Optional[dict]) -> LocalEditSnapshot | None:
     """Capture before-state for local write previews."""
     paths = _resolve_local_edit_paths(tool_name, function_args)
     if not paths:
@@ -365,7 +366,7 @@ def capture_local_edit_snapshot(tool_name: str, function_args: dict | None) -> L
     return snapshot
 
 
-def _result_succeeded(result: str | None) -> bool:
+def _result_succeeded(result: Optional[str]) -> bool:
     """Conservatively detect whether a tool result represents success."""
     if not result:
         return False
@@ -381,12 +382,12 @@ def _result_succeeded(result: str | None) -> bool:
     return True
 
 
-def _diff_from_snapshot(snapshot: LocalEditSnapshot | None) -> str | None:
+def _diff_from_snapshot(snapshot: LocalEditSnapshot | None) -> Optional[str]:
     """Generate unified diff text from a stored before-state and current files."""
     if not snapshot:
         return None
 
-    chunks: list[str] = []
+    chunks: List[str] = []
     for path in snapshot.paths:
         before = snapshot.before.get(str(path))
         after = _snapshot_text(path)
@@ -412,11 +413,11 @@ def _diff_from_snapshot(snapshot: LocalEditSnapshot | None) -> str | None:
 
 def extract_edit_diff(
     tool_name: str,
-    result: str | None,
+    result: Optional[str],
     *,
-    function_args: dict | None = None,
+    function_args: Optional[dict] = None,
     snapshot: LocalEditSnapshot | None = None,
-) -> str | None:
+) -> Optional[str]:
     """Extract a unified diff from a file-edit tool result."""
     if tool_name == "patch" and result:
         data = safe_json_loads(result)
@@ -445,9 +446,9 @@ def _emit_inline_diff(diff_text: str, print_fn) -> bool:
         return False
 
 
-def _render_inline_unified_diff(diff: str) -> list[str]:
+def _render_inline_unified_diff(diff: str) -> List[str]:
     """Render unified diff lines in Hermes' inline transcript style."""
-    rendered: list[str] = []
+    rendered: List[str] = []
     from_file = None
     to_file = None
 
@@ -478,10 +479,10 @@ def _render_inline_unified_diff(diff: str) -> list[str]:
     return rendered
 
 
-def _split_unified_diff_sections(diff: str) -> list[str]:
+def _split_unified_diff_sections(diff: str) -> List[str]:
     """Split a unified diff into per-file sections."""
-    sections: list[list[str]] = []
-    current: list[str] = []
+    sections: List[list[str]] = []
+    current: List[str] = []
 
     for line in diff.splitlines():
         if line.startswith("--- ") and current:
@@ -501,10 +502,10 @@ def _summarize_rendered_diff_sections(
     *,
     max_files: int = _MAX_INLINE_DIFF_FILES,
     max_lines: int = _MAX_INLINE_DIFF_LINES,
-) -> list[str]:
+) -> List[str]:
     """Render diff sections while capping file count and total line count."""
     sections = _split_unified_diff_sections(diff)
-    rendered: list[str] = []
+    rendered: List[str] = []
     omitted_files = 0
     omitted_lines = 0
 
@@ -543,9 +544,9 @@ def _summarize_rendered_diff_sections(
 
 def render_edit_diff_with_delta(
     tool_name: str,
-    result: str | None,
+    result: Optional[str],
     *,
-    function_args: dict | None = None,
+    function_args: Optional[dict] = None,
     snapshot: LocalEditSnapshot | None = None,
     print_fn=None,
 ) -> bool:
@@ -801,7 +802,7 @@ class KawaiiSpinner:
 # Cute tool message (completion line that replaces the spinner)
 # =========================================================================
 
-def _detect_tool_failure(tool_name: str, result: str | None) -> tuple[bool, str]:
+def _detect_tool_failure(tool_name: str, result: Optional[str]) -> Tuple[bool, str]:
     """Inspect a tool result string for signs of failure.
 
     Returns ``(is_failure, suffix)`` where *suffix* is an informational tag
@@ -835,7 +836,7 @@ def _detect_tool_failure(tool_name: str, result: str | None) -> tuple[bool, str]
 
 
 def get_cute_tool_message(
-    tool_name: str, args: dict, duration: float, result: str | None = None,
+    tool_name: str, args: dict, duration: float, result: Optional[str] = None,
 ) -> str:
     """Generate a formatted tool completion line for CLI quiet mode.
 

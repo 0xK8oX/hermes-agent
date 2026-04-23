@@ -49,7 +49,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple, List, Dict
 
 
 def _require_tty(command_name: str) -> None:
@@ -890,7 +890,7 @@ def _ensure_tui_node() -> None:
         return
 
     parts = os.environ.get("PATH", "").split(os.pathsep)
-    extras: list[Path] = []
+    extras: List[Path] = []
 
     resolved = (result.stdout or "").strip()
     if resolved:
@@ -905,7 +905,7 @@ def _ensure_tui_node() -> None:
     os.environ["PATH"] = os.pathsep.join(parts)
 
 
-def _make_tui_argv(tui_dir: Path, tui_dev: bool) -> tuple[list[str], Path]:
+def _make_tui_argv(tui_dir: Path, tui_dev: bool) -> Tuple[List[str], Path]:
     """TUI: --dev → tsx src; else node dist (HERMES_TUI_DIR or ui-tui, build when stale)."""
     _ensure_tui_node()
 
@@ -1440,7 +1440,7 @@ def select_provider_and_model(args=None):
     # Step 1: Provider selection — flat list from CANONICAL_PROVIDERS
     all_providers = [(p.slug, p.tui_desc) for p in CANONICAL_PROVIDERS]
 
-    def _named_custom_provider_map(cfg) -> dict[str, dict[str, str]]:
+    def _named_custom_provider_map(cfg) -> Dict[str, dict[str, str]]:
         custom_provider_map = {}
         for entry in get_compatible_custom_providers(cfg):
             if not isinstance(entry, dict):
@@ -1626,7 +1626,7 @@ def _clear_stale_openai_base_url():
 # ─────────────────────────────────────────────────────────────────────────────
 
 # (task_key, display_name, short_description)
-_AUX_TASKS: list[tuple[str, str, str]] = [
+_AUX_TASKS: List[Tuple[str, str, str]] = [
     ("vision",           "Vision",           "image/screenshot analysis"),
     ("compression",      "Compression",      "context summarization"),
     ("web_extract",      "Web extract",      "web page summarization"),
@@ -1743,7 +1743,7 @@ def _aux_config_menu() -> None:
         # Build the task menu with current settings inline
         name_col = max(len(name) for _, name, _ in _AUX_TASKS) + 2
         desc_col = max(len(desc) for _, _, desc in _AUX_TASKS) + 4
-        entries: list[tuple[str, str]] = []
+        entries: List[Tuple[str, str]] = []
         for task_key, name, desc in _AUX_TASKS:
             task_cfg = aux.get(task_key, {}) if isinstance(aux.get(task_key), dict) else {}
             current = _format_aux_current(task_cfg)
@@ -1799,7 +1799,7 @@ def _aux_select_for_task(task: str) -> None:
         print(f"Could not detect authenticated providers: {exc}")
         providers = []
 
-    entries: list[tuple[str, str, list[str]]] = []  # (slug, label, models)
+    entries: List[Tuple[str, str, list[str]]] = []  # (slug, label, models)
     # "auto" always first
     auto_marker = "  ← current" if current_provider == "auto" and not current_base_url else ""
     entries.append(("__auto__", f"auto (recommended){auto_marker}", []))
@@ -2138,7 +2138,7 @@ def _model_flow_nous(config, current_model="", args=None):
     # free models and allowlist models that aren't actually free).
     # Then for free users: partition remaining models into selectable/unavailable.
     model_ids = filter_nous_free_models(model_ids, pricing)
-    unavailable_models: list[str] = []
+    unavailable_models: List[str] = []
     if free_tier:
         model_ids, unavailable_models = partition_nous_models_by_tier(
             model_ids, pricing, free_tier=True
@@ -4444,7 +4444,7 @@ def _update_via_zip(args):
     print("✓ Update complete!")
 
 
-def _stash_local_changes_if_needed(git_cmd: list[str], cwd: Path) -> Optional[str]:
+def _stash_local_changes_if_needed(git_cmd: List[str], cwd: Path) -> Optional[str]:
     status = subprocess.run(
         git_cmd + ["status", "--porcelain"],
         cwd=cwd,
@@ -4491,7 +4491,7 @@ def _stash_local_changes_if_needed(git_cmd: list[str], cwd: Path) -> Optional[st
 
 
 def _resolve_stash_selector(
-    git_cmd: list[str], cwd: Path, stash_ref: str
+    git_cmd: List[str], cwd: Path, stash_ref: str
 ) -> Optional[str]:
     stash_list = subprocess.run(
         git_cmd + ["stash", "list", "--format=%gd %H"],
@@ -4523,7 +4523,7 @@ def _print_stash_cleanup_guidance(
 
 
 def _restore_stashed_changes(
-    git_cmd: list[str],
+    git_cmd: List[str],
     cwd: Path,
     stash_ref: str,
     prompt_user: bool = False,
@@ -4644,7 +4644,7 @@ OFFICIAL_REPO_URL = "https://github.com/NousResearch/hermes-agent.git"
 SKIP_UPSTREAM_PROMPT_FILE = ".skip_upstream_prompt"
 
 
-def _get_origin_url(git_cmd: list[str], cwd: Path) -> Optional[str]:
+def _get_origin_url(git_cmd: List[str], cwd: Path) -> Optional[str]:
     """Get the URL of the origin remote, or None if not set."""
     try:
         result = subprocess.run(
@@ -4677,7 +4677,7 @@ def _is_fork(origin_url: Optional[str]) -> bool:
     return True
 
 
-def _has_upstream_remote(git_cmd: list[str], cwd: Path) -> bool:
+def _has_upstream_remote(git_cmd: List[str], cwd: Path) -> bool:
     """Check if an 'upstream' remote already exists."""
     try:
         result = subprocess.run(
@@ -4691,7 +4691,7 @@ def _has_upstream_remote(git_cmd: list[str], cwd: Path) -> bool:
         return False
 
 
-def _add_upstream_remote(git_cmd: list[str], cwd: Path) -> bool:
+def _add_upstream_remote(git_cmd: List[str], cwd: Path) -> bool:
     """Add the official repo as the 'upstream' remote. Returns True on success."""
     try:
         result = subprocess.run(
@@ -4705,7 +4705,7 @@ def _add_upstream_remote(git_cmd: list[str], cwd: Path) -> bool:
         return False
 
 
-def _count_commits_between(git_cmd: list[str], cwd: Path, base: str, head: str) -> int:
+def _count_commits_between(git_cmd: List[str], cwd: Path, base: str, head: str) -> int:
     """Count commits on `head` that are not on `base`. Returns -1 on error."""
     try:
         result = subprocess.run(
@@ -4738,7 +4738,7 @@ def _mark_skip_upstream_prompt():
         pass
 
 
-def _sync_fork_with_upstream(git_cmd: list[str], cwd: Path) -> bool:
+def _sync_fork_with_upstream(git_cmd: List[str], cwd: Path) -> bool:
     """Attempt to push updated main to origin (sync fork).
 
     Returns True if push succeeded, False otherwise.
@@ -4755,7 +4755,7 @@ def _sync_fork_with_upstream(git_cmd: list[str], cwd: Path) -> bool:
         return False
 
 
-def _sync_with_upstream_if_needed(git_cmd: list[str], cwd: Path) -> None:
+def _sync_with_upstream_if_needed(git_cmd: List[str], cwd: Path) -> None:
     """Check if fork is behind upstream and sync if safe.
 
     This implements the fork upstream sync logic:
@@ -4897,7 +4897,7 @@ def _invalidate_update_cache():
             pass
 
 
-def _load_installable_optional_extras() -> list[str]:
+def _load_installable_optional_extras() -> List[str]:
     """Return the optional extras referenced by the ``all`` group.
 
     Only extras that ``[all]`` actually pulls in are retried individually.
@@ -4920,7 +4920,7 @@ def _load_installable_optional_extras() -> list[str]:
     # Parse the [all] group to find which extras it references.
     # Entries look like "hermes-agent[matrix]" or "package-name[extra]".
     all_refs = optional_deps.get("all", [])
-    referenced: list[str] = []
+    referenced: List[str] = []
     for ref in all_refs:
         if "[" in ref and "]" in ref:
             name = ref.split("[", 1)[1].split("]", 1)[0]
@@ -4931,9 +4931,9 @@ def _load_installable_optional_extras() -> list[str]:
 
 
 def _install_python_dependencies_with_optional_fallback(
-    install_cmd_prefix: list[str],
+    install_cmd_prefix: List[str],
     *,
-    env: dict[str, str] | None = None,
+    env: Dict[str, str] | None = None,
 ) -> None:
     """Install base deps plus as many optional extras as the environment supports."""
     try:
@@ -4956,8 +4956,8 @@ def _install_python_dependencies_with_optional_fallback(
         env=env,
     )
 
-    failed_extras: list[str] = []
-    installed_extras: list[str] = []
+    failed_extras: List[str] = []
+    installed_extras: List[str] = []
     for extra in _load_installable_optional_extras():
         try:
             subprocess.run(

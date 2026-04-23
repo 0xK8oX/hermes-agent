@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+from typing import List
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -13,7 +14,7 @@ TEMPLATE_DIR = SKILL_DIR / "templates"
 PLACEHOLDER = "__SERVER_NAME__"
 
 
-def list_templates() -> list[str]:
+def list_templates() -> List[str]:
     return sorted(path.stem for path in TEMPLATE_DIR.glob("*.py"))
 
 

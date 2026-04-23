@@ -590,7 +590,13 @@ class TestCallLlmPaymentFallback:
         return exc
 
     def test_non_payment_error_not_caught(self, monkeypatch):
-        """Non-payment/non-connection errors (500) should NOT trigger fallback."""
+        """Non-payment/non-connection errors (500) should NOT trigger fallback
+        when no configured fallback providers are available.
+
+        500 IS detected as fallback-worthy by _is_rate_limit_or_overload_error,
+        but _try_configured_fallback returns None when fallback_providers is
+        empty — so the original error propagates unchanged.
+        """
         monkeypatch.setenv("OPENROUTER_API_KEY", "or-key")
 
         primary_client = MagicMock()
@@ -601,7 +607,11 @@ class TestCallLlmPaymentFallback:
         with patch("agent.auxiliary_client._get_cached_client",
                     return_value=(primary_client, "google/gemini-3-flash-preview")), \
              patch("agent.auxiliary_client._resolve_task_provider_model",
-                    return_value=("auto", "google/gemini-3-flash-preview", None, None, None)):
+                    return_value=("auto", "google/gemini-3-flash-preview", None, None, None)), \
+             patch("agent.auxiliary_client._try_configured_fallback",
+                    return_value=(None, None, "")), \
+             patch("agent.auxiliary_client._try_payment_fallback",
+                    return_value=(None, None, "")):
             with pytest.raises(Exception, match="Internal Server Error"):
                 call_llm(
                     task="compression",

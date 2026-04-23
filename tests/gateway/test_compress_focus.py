@@ -8,6 +8,7 @@ import pytest
 from gateway.config import GatewayConfig, Platform, PlatformConfig
 from gateway.platforms.base import MessageEvent
 from gateway.session import SessionEntry, SessionSource, build_session_key
+from typing import List, Dict
 
 
 def _make_source() -> SessionSource:
@@ -24,7 +25,7 @@ def _make_event(text: str = "/compress") -> MessageEvent:
     return MessageEvent(text=text, source=_make_source(), message_id="m1")
 
 
-def _make_history() -> list[dict[str, str]]:
+def _make_history() -> List[Dict[str, str]]:
     return [
         {"role": "user", "content": "one"},
         {"role": "assistant", "content": "two"},
@@ -33,7 +34,7 @@ def _make_history() -> list[dict[str, str]]:
     ]
 
 
-def _make_runner(history: list[dict[str, str]]):
+def _make_runner(history: List[Dict[str, str]]):
     from gateway.run import GatewayRunner
 
     runner = object.__new__(GatewayRunner)

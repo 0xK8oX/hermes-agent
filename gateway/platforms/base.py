@@ -17,6 +17,7 @@ import subprocess
 import sys
 import uuid
 from abc import ABC, abstractmethod
+from typing import Dict, List, Optional, Any, Callable, Awaitable, Tuple, Union
 from urllib.parse import urlsplit
 
 logger = logging.getLogger(__name__)
@@ -110,7 +111,7 @@ def is_network_accessible(host: str) -> bool:
         return True
 
 
-def _detect_macos_system_proxy() -> str | None:
+def _detect_macos_system_proxy() -> Optional[str]:
     """Read the macOS system HTTP(S) proxy via ``scutil --proxy``.
 
     Returns an ``http://host:port`` URL string if an HTTP or HTTPS proxy is
@@ -146,7 +147,7 @@ def _detect_macos_system_proxy() -> str | None:
     return None
 
 
-def resolve_proxy_url(platform_env_var: str | None = None) -> str | None:
+def resolve_proxy_url(platform_env_var: Optional[str] = None) -> Optional[str]:
     """Return a proxy URL from env vars, or macOS system proxy.
 
     Check order:
@@ -168,7 +169,7 @@ def resolve_proxy_url(platform_env_var: str | None = None) -> str | None:
     return _detect_macos_system_proxy()
 
 
-def proxy_kwargs_for_bot(proxy_url: str | None) -> dict:
+def proxy_kwargs_for_bot(proxy_url: Optional[str]) -> dict:
     """Build kwargs for ``commands.Bot()`` / ``discord.Client()`` with proxy.
 
     Returns:
@@ -198,7 +199,7 @@ def proxy_kwargs_for_bot(proxy_url: str | None) -> dict:
     return {"proxy": proxy_url}
 
 
-def proxy_kwargs_for_aiohttp(proxy_url: str | None) -> tuple[dict, dict]:
+def proxy_kwargs_for_aiohttp(proxy_url: Optional[str]) -> Tuple[dict, dict]:
     """Build kwargs for standalone ``aiohttp.ClientSession`` with proxy.
 
     Returns ``(session_kwargs, request_kwargs)`` where:
@@ -234,7 +235,6 @@ def proxy_kwargs_for_aiohttp(proxy_url: str | None) -> tuple[dict, dict]:
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Callable, Awaitable, Tuple
 from enum import Enum
 
 from pathlib import Path as _Path
@@ -724,7 +724,7 @@ class MessageEvent:
     
     # Auto-loaded skill(s) for topic/channel bindings (e.g., Telegram DM Topics,
     # Discord channel_skill_bindings).  A single name or ordered list.
-    auto_skill: Optional[str | list[str]] = None
+    auto_skill: Optional[Union[str , List[str]]] = None
 
     # Per-channel ephemeral system prompt (e.g. Discord channel_prompts).
     # Applied at API call time and never persisted to transcript history.
@@ -857,8 +857,8 @@ MessageHandler = Callable[[MessageEvent], Awaitable[Optional[str]]]
 def resolve_channel_prompt(
     config_extra: dict,
     channel_id: str,
-    parent_id: str | None = None,
-) -> str | None:
+    parent_id: Optional[str] = None,
+) -> Optional[str]:
     """Resolve a per-channel ephemeral prompt from platform config.
 
     Looks up ``channel_prompts`` in the adapter's ``config.extra`` dict.
@@ -903,7 +903,7 @@ class BasePlatformAdapter(ABC):
         self._fatal_error_code: Optional[str] = None
         self._fatal_error_message: Optional[str] = None
         self._fatal_error_retryable = True
-        self._fatal_error_handler: Optional[Callable[["BasePlatformAdapter"], Awaitable[None] | None]] = None
+        self._fatal_error_handler: Optional[Callable[["BasePlatformAdapter"], Awaitable[None]]] = None
         
         # Track active message handlers per session for interrupt support
         # Key: session_key (e.g., chat_id), Value: (event, asyncio.Event for interrupt)
@@ -943,7 +943,7 @@ class BasePlatformAdapter(ABC):
     def fatal_error_retryable(self) -> bool:
         return self._fatal_error_retryable
 
-    def set_fatal_error_handler(self, handler: Callable[["BasePlatformAdapter"], Awaitable[None] | None]) -> None:
+    def set_fatal_error_handler(self, handler: Optional[Callable[["BasePlatformAdapter"], Awaitable[None]]]) -> None:
         self._fatal_error_handler = handler
 
     def _mark_connected(self) -> None:
@@ -1351,7 +1351,7 @@ class BasePlatformAdapter(ABC):
         # Extract MEDIA:<path> tags, allowing optional whitespace after the colon
         # and quoted/backticked paths for LLM-formatted outputs.
         media_pattern = re.compile(
-            r'''[`"']?MEDIA:\s*(?P<path>`[^`\n]+`|"[^"\n]+"|'[^'\n]+'|(?:~/|/)\S+(?:[^\S\n]+\S+)*?\.(?:png|jpe?g|gif|webp|mp4|mov|avi|mkv|webm|ogg|opus|mp3|wav|m4a)(?=[\s`"',;:)\]}]|$)|\S+)[`"']?'''
+            r'''[`"']?MEDIA:\s*(?P<path>`[^`\n]+`|"[^"\n]+"|'[^'\n]+'|(?:~/|/)\S+(?:[^\S\n]+\S+)*?\.(?:Union[png, jpe]?Union[g, gif]|Union[webp, mp4]|Union[mov, avi]|Union[mkv, webm]|Union[ogg, opus]|Union[mp3, wav]|m4a)(?=[\s`"',;:)\]}]|$)|\S+)[`"']?'''
         )
         for match in media_pattern.finditer(content):
             path = match.group("path").strip()
@@ -1441,7 +1441,7 @@ class BasePlatformAdapter(ABC):
         chat_id: str,
         interval: float = 2.0,
         metadata=None,
-        stop_event: asyncio.Event | None = None,
+        stop_event: Optional[asyncio.Event] = None,
     ) -> None:
         """
         Continuously send typing indicator until cancelled.
@@ -1510,7 +1510,7 @@ class BasePlatformAdapter(ABC):
         session_key: str,
         callback: Callable,
         *,
-        generation: int | None = None,
+        generation: Optional[int] = None,
     ) -> None:
         """Register a deferred callback to fire after the main response.
 
@@ -1528,8 +1528,8 @@ class BasePlatformAdapter(ABC):
         self,
         session_key: str,
         *,
-        generation: int | None = None,
-    ) -> Callable | None:
+        generation: Optional[int] = None,
+    ) -> Optional[Callable]:
         """Pop a deferred callback, optionally requiring generation ownership."""
         if not session_key:
             return None

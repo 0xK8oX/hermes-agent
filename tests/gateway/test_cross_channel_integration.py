@@ -25,6 +25,7 @@ from gateway.platforms.base import (
     SessionSource,
 )
 from gateway.run import GatewayRunner
+from typing import List
 
 
 # ---------------------------------------------------------------------------
@@ -44,7 +45,7 @@ class RecordingAdapter(BasePlatformAdapter):
 
     def __init__(self, platform: Platform):
         self._platform = platform
-        self.received_events: list[MessageEvent] = []
+        self.received_events: List[MessageEvent] = []
         # BasePlatformAdapter needs a PlatformConfig
         super().__init__(PlatformConfig(enabled=True, token="test"), platform)
 

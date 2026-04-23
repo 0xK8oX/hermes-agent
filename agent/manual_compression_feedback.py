@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-from typing import Any, Sequence
+from typing import Any, Sequence, Dict
 
 
 def summarize_manual_compression(
-    before_messages: Sequence[dict[str, Any]],
-    after_messages: Sequence[dict[str, Any]],
+    before_messages: Sequence[Dict[str, Any]],
+    after_messages: Sequence[Dict[str, Any]],
     before_tokens: int,
     after_tokens: int,
-) -> dict[str, Any]:
+) -> Dict[str, Any]:
     """Return consistent user-facing feedback for manual compression."""
     before_count = len(before_messages)
     after_count = len(after_messages)

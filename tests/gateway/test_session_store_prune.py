@@ -23,6 +23,7 @@ import pytest
 
 from gateway.config import GatewayConfig, Platform, SessionResetPolicy
 from gateway.session import SessionEntry, SessionStore
+from typing import Optional
 
 
 def _make_store(tmp_path, max_age_days: int = 90, has_active_processes_fn=None):
@@ -43,7 +44,7 @@ def _make_store(tmp_path, max_age_days: int = 90, has_active_processes_fn=None):
 
 
 def _entry(key: str, age_days: float, *, suspended: bool = False,
-           session_id: str | None = None) -> SessionEntry:
+           session_id: Optional[str] = None) -> SessionEntry:
     now = datetime.now()
     return SessionEntry(
         session_key=key,

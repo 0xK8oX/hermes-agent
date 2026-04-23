@@ -10,6 +10,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 import yaml
 
+from typing import Optional
+
 from hermes_cli.plugins import (
     ENTRY_POINTS_GROUP,
     VALID_HOOKS,
@@ -30,7 +32,7 @@ from hermes_cli.plugins import (
 
 
 def _make_plugin_dir(base: Path, name: str, *, register_body: str = "pass",
-                     manifest_extra: dict | None = None,
+                     manifest_extra: Optional[dict] = None,
                      auto_enable: bool = True) -> Path:
     """Create a minimal plugin directory with plugin.yaml + __init__.py.
 

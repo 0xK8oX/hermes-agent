@@ -129,7 +129,7 @@ def _apply_mcp_preset(
     command: Optional[str],
     cmd_args: List[str],
     server_config: Dict[str, Any],
-) -> tuple[Optional[str], Optional[str], List[str], bool]:
+) -> Tuple[Optional[str], Optional[str], List[str], bool]:
     """Apply a known MCP preset when transport details were omitted."""
     if not preset_name:
         return url, command, cmd_args, False

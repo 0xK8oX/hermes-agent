@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from typing import Tuple, List
 
 
 TOOLS_DIR = Path(__file__).resolve().parents[2] / "tools"
@@ -22,7 +23,7 @@ def _load_tool_module(module_name: str, filename: str):
     return module
 
 
-def _reset_modules(prefixes: tuple[str, ...]):
+def _reset_modules(prefixes: Tuple[str, ...]):
     for name in list(sys.modules):
         if name.startswith(prefixes):
             sys.modules.pop(name, None)
@@ -249,8 +250,8 @@ def test_browser_use_managed_gateway_reuses_pending_idempotency_key_after_timeou
 
             provider.create_session("task-browser-use-timeout")
 
-    first_headers = post.call_args_list[0].kwargs["headers"]
-    second_headers = post.call_args_list[1].kwargs["headers"]
+    first_headers = post.call_args_List[0].kwargs["headers"]
+    second_headers = post.call_args_List[1].kwargs["headers"]
     assert first_headers["X-Idempotency-Key"] == second_headers["X-Idempotency-Key"]
 
 
@@ -310,8 +311,8 @@ def test_browser_use_managed_gateway_preserves_pending_idempotency_key_for_in_pr
 
             provider.create_session("task-browser-use-conflict")
 
-    first_headers = post.call_args_list[0].kwargs["headers"]
-    second_headers = post.call_args_list[1].kwargs["headers"]
+    first_headers = post.call_args_List[0].kwargs["headers"]
+    second_headers = post.call_args_List[1].kwargs["headers"]
     assert first_headers["X-Idempotency-Key"] == second_headers["X-Idempotency-Key"]
 
 
@@ -347,8 +348,8 @@ def test_browser_use_managed_gateway_uses_new_idempotency_key_for_a_new_session_
             provider.create_session("task-browser-use-new")
             provider.create_session("task-browser-use-new")
 
-    first_headers = post.call_args_list[0].kwargs["headers"]
-    second_headers = post.call_args_list[1].kwargs["headers"]
+    first_headers = post.call_args_List[0].kwargs["headers"]
+    second_headers = post.call_args_List[1].kwargs["headers"]
     assert first_headers["X-Idempotency-Key"] != second_headers["X-Idempotency-Key"]
 
 

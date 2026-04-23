@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, patch
 
 from cli import HermesCLI, _rich_text_from_ansi
 from hermes_cli.skin_engine import get_active_skin, set_active_skin
+from typing import Dict
 
 
 def _make_cli_stub():

@@ -11,6 +11,7 @@ from tools.environments import ssh as ssh_env
 from tools.environments import modal as modal_env
 from tools.environments import daytona as daytona_env
 from tools.environments.ssh import SSHEnvironment
+from typing import List
 
 
 # ── SSH helpers ──────────────────────────────────────────────────────
@@ -352,14 +353,14 @@ class TestDaytonaBulkDownload:
 
         # exec called twice: tar creation + rm cleanup
         assert env._sandbox.process.exec.call_count == 2
-        tar_cmd = env._sandbox.process.exec.call_args_list[0][0][0]
+        tar_cmd = env._sandbox.process.exec.call_args_List[0][0][0]
         assert "tar cf" in tar_cmd
         # PID-suffixed temp path avoids collisions on sync_back retry
         assert "/tmp/.hermes_sync." in tar_cmd
         assert ".tar" in tar_cmd
         assert ".hermes" in tar_cmd
 
-        cleanup_cmd = env._sandbox.process.exec.call_args_list[1][0][0]
+        cleanup_cmd = env._sandbox.process.exec.call_args_List[1][0][0]
         assert "rm -f" in cleanup_cmd
         assert "/tmp/.hermes_sync." in cleanup_cmd
 
@@ -378,7 +379,7 @@ class TestDaytonaBulkDownload:
 
         env._daytona_bulk_download(dest)
 
-        tar_cmd = env._sandbox.process.exec.call_args_list[0][0][0]
+        tar_cmd = env._sandbox.process.exec.call_args_List[0][0][0]
         assert "home/daytona/.hermes" in tar_cmd
 
 

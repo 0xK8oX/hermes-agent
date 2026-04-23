@@ -13,13 +13,14 @@ import sys
 from pathlib import Path
 
 from hermes_constants import get_hermes_home
+from typing import Optional, Tuple, List
 
 
 # ---------------------------------------------------------------------------
 # Curses-based interactive picker (same pattern as hermes tools)
 # ---------------------------------------------------------------------------
 
-def _curses_select(title: str, items: list[tuple[str, str]], default: int = 0) -> int:
+def _curses_select(title: str, items: List[Tuple[str, str]], default: int = 0) -> int:
     """Interactive single-select with arrow keys.
 
     items: list of (label, description) tuples.
@@ -34,7 +35,7 @@ def _curses_select(title: str, items: list[tuple[str, str]], default: int = 0) -
     return curses_radiolist(title, display_items, selected=default, cancel_returns=default)
 
 
-def _prompt(label: str, default: str | None = None, secret: bool = False) -> str:
+def _prompt(label: str, default: Optional[str] = None, secret: bool = False) -> str:
     """Prompt for a value with optional default and secret masking."""
     suffix = f" [{default}]" if default else ""
     if secret:

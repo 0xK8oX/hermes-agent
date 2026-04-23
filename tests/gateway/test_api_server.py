@@ -22,6 +22,8 @@ from aiohttp import web
 from aiohttp.test_utils import AioHTTPTestCase, TestClient, TestServer
 
 from gateway.config import GatewayConfig, Platform, PlatformConfig
+from typing import List
+
 from gateway.platforms.api_server import (
     APIServerAdapter,
     ResponseStore,
@@ -1924,7 +1926,7 @@ class TestConversationParameter:
 
                 # The second call should have received conversation history from the first
                 assert mock_run.call_count == 2
-                second_call_kwargs = mock_run.call_args_list[1]
+                second_call_kwargs = mock_run.call_args_List[1]
                 history = second_call_kwargs.kwargs.get("conversation_history",
                           second_call_kwargs[1].get("conversation_history", []) if len(second_call_kwargs) > 1 else [])
                 # History should be non-empty (contains messages from first response)

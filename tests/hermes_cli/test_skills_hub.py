@@ -6,6 +6,7 @@ from rich.console import Console
 
 from cli import ChatConsole
 from hermes_cli.skills_hub import do_check, do_install, do_list, do_update, handle_skills_slash
+from typing import Tuple, List
 
 
 class _DummyLockFile:
@@ -80,7 +81,7 @@ def _capture_check(monkeypatch, results, name=None) -> str:
     return sink.getvalue()
 
 
-def _capture_update(monkeypatch, results) -> tuple[str, list[tuple[str, str, bool]]]:
+def _capture_update(monkeypatch, results) -> Tuple[str, List[tuple[str, str, bool]]]:
     import tools.skills_hub as hub
     import hermes_cli.skills_hub as cli_hub
 

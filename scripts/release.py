@@ -28,6 +28,7 @@ import sys
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
+from typing import Tuple, List
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 VERSION_FILE = REPO_ROOT / "hermes_cli" / "__init__.py"
@@ -350,7 +351,7 @@ def get_last_tag():
     return None
 
 
-def next_available_tag(base_tag: str) -> tuple[str, str]:
+def next_available_tag(base_tag: str) -> Tuple[str, str]:
     """Return a tag/calver pair, suffixing same-day releases when needed."""
     if not git("tag", "--list", base_tag):
         return base_tag, base_tag.removeprefix("v")
@@ -418,7 +419,7 @@ def update_version_files(semver: str, calver_date: str):
     PYPROJECT_FILE.write_text(pyproject)
 
 
-def build_release_artifacts(semver: str) -> list[Path]:
+def build_release_artifacts(semver: str) -> List[Path]:
     """Build sdist/wheel artifacts for the current release.
 
     Returns the artifact paths when the local environment has ``python -m build``

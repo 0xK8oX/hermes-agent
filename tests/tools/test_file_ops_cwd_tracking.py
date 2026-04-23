@@ -23,6 +23,7 @@ import tempfile
 import pytest
 
 from tools.file_operations import ShellFileOperations
+from typing import List
 
 
 class _FakeEnv:
@@ -36,7 +37,7 @@ class _FakeEnv:
 
     def __init__(self, start_cwd: str):
         self.cwd = start_cwd
-        self.calls: list[dict] = []
+        self.calls: List[dict] = []
 
     def execute(self, command: str, cwd: str = None, **kwargs) -> dict:
         import subprocess

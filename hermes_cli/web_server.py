@@ -22,7 +22,7 @@ import time
 import urllib.parse
 import urllib.request
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple, Set
 
 import yaml
 
@@ -334,7 +334,7 @@ _GATEWAY_HEALTH_URL = os.getenv("GATEWAY_HEALTH_URL")
 _GATEWAY_HEALTH_TIMEOUT = float(os.getenv("GATEWAY_HEALTH_TIMEOUT", "3"))
 
 
-def _probe_gateway_health() -> tuple[bool, dict | None]:
+def _probe_gateway_health() -> Tuple[bool, Optional[dict]]:
     """Probe the gateway via its HTTP health endpoint (cross-container).
 
     Uses ``/health/detailed`` first (returns full state), falling back to
@@ -380,7 +380,7 @@ async def get_status():
     # dashboard works when the gateway runs in a separate container.
     gateway_pid = get_running_pid()
     gateway_running = gateway_pid is not None
-    remote_health_body: dict | None = None
+    remote_health_body: Optional[dict] = None
 
     if not gateway_running and _GATEWAY_HEALTH_URL:
         loop = asyncio.get_event_loop()
@@ -397,7 +397,7 @@ async def get_status():
     gateway_platforms: dict = {}
     gateway_exit_reason = None
     gateway_updated_at = None
-    configured_gateway_platforms: set[str] | None = None
+    configured_gateway_platforms: Set[str] | None = None
     try:
         from gateway.config import load_gateway_config
 
@@ -930,7 +930,7 @@ def _claude_code_only_status() -> Dict[str, Any]:
 # right UI: ``pkce`` = open URL + paste callback code, ``device_code`` =
 # show code + verification URL + poll, ``external`` = read-only (delegated
 # to a third-party CLI like Claude Code or Qwen).
-_OAUTH_PROVIDER_CATALOG: tuple[Dict[str, Any], ...] = (
+_OAUTH_PROVIDER_CATALOG: Tuple[Dict[str, Any], ...] = (
     {
         "id": "anthropic",
         "name": "Anthropic (Claude API)",
@@ -1160,7 +1160,7 @@ def _gc_oauth_sessions() -> None:
             _oauth_sessions.pop(sid, None)
 
 
-def _new_oauth_session(provider_id: str, flow: str) -> tuple[str, Dict[str, Any]]:
+def _new_oauth_session(provider_id: str, flow: str) -> Tuple[str, Dict[str, Any]]:
     """Create + register a new OAuth session, return (session_id, session_dict)."""
     sid = secrets.token_urlsafe(16)
     sess = {

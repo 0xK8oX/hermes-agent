@@ -18,7 +18,7 @@ import time
 import uuid
 from abc import abstractmethod
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Optional
 
 from tools.environments.base import BaseEnvironment
 from tools.interrupt import is_interrupted
@@ -31,7 +31,7 @@ class PreparedModalExec:
     command: str
     cwd: str
     timeout: int
-    stdin_data: str | None = None
+    stdin_data: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -39,7 +39,7 @@ class ModalExecStart:
     """Transport response after starting an exec."""
 
     handle: Any | None = None
-    immediate_result: dict | None = None
+    immediate_result: Optional[dict] = None
 
 
 def wrap_modal_stdin_heredoc(command: str, stdin_data: str) -> str:
@@ -68,7 +68,7 @@ class BaseModalExecutionEnvironment(BaseEnvironment):
 
     _stdin_mode = "payload"
     _poll_interval_seconds = 0.25
-    _client_timeout_grace_seconds: float | None = None
+    _client_timeout_grace_seconds: Optional[float] = None
     _interrupt_output = "[Command interrupted]"
     _unexpected_error_prefix = "Modal execution error"
 
@@ -77,8 +77,8 @@ class BaseModalExecutionEnvironment(BaseEnvironment):
         command: str,
         cwd: str = "",
         *,
-        timeout: int | None = None,
-        stdin_data: str | None = None,
+        timeout: Optional[int] = None,
+        stdin_data: Optional[str] = None,
     ) -> dict:
         self._before_execute()
         prepared = self._prepare_modal_exec(
@@ -152,8 +152,8 @@ class BaseModalExecutionEnvironment(BaseEnvironment):
         command: str,
         *,
         cwd: str = "",
-        timeout: int | None = None,
-        stdin_data: str | None = None,
+        timeout: Optional[int] = None,
+        stdin_data: Optional[str] = None,
     ) -> PreparedModalExec:
         effective_cwd = cwd or self.cwd
         effective_timeout = timeout or self.timeout
@@ -191,7 +191,7 @@ class BaseModalExecutionEnvironment(BaseEnvironment):
         """Begin a transport-specific exec."""
 
     @abstractmethod
-    def _poll_modal_exec(self, handle: Any) -> dict | None:
+    def _poll_modal_exec(self, handle: Any) -> Optional[dict]:
         """Return a final result dict when complete, else ``None``."""
 
     @abstractmethod

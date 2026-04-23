@@ -9,6 +9,7 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from typing import List
 
 
 class TestStepCallbackNormalization:
@@ -30,7 +31,7 @@ class TestStepCallbackNormalization:
         loop = asyncio.new_event_loop()
 
         def _step_callback_sync(iteration: int, prev_tools: list) -> None:
-            _names: list[str] = []
+            _names: List[str] = []
             for _t in (prev_tools or []):
                 if isinstance(_t, dict):
                     _names.append(_t.get("name") or "")
@@ -48,7 +49,7 @@ class TestStepCallbackNormalization:
         return _step_callback_sync, captured_events, loop
 
     def test_dict_prev_tools_produce_string_tool_names(self):
-        """When prev_tools is list[dict], tool_names should be list[str]."""
+        """When prev_tools is List[dict], tool_names should be List[str]."""
         cb, events, loop = self._extract_step_callback()
 
         # Simulate the enriched format from run_agent.py
@@ -76,7 +77,7 @@ class TestStepCallbackNormalization:
         assert data["tools"] == prev_tools
 
     def test_string_prev_tools_still_work(self):
-        """When prev_tools is list[str] (legacy), tool_names should pass through."""
+        """When prev_tools is List[str] (legacy), tool_names should pass through."""
         cb, events, loop = self._extract_step_callback()
 
         prev_tools = ["terminal", "read_file"]

@@ -26,7 +26,7 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 
-def _normalize_cwd_for_compare(cwd: str | None) -> str:
+def _normalize_cwd_for_compare(cwd: Optional[str]) -> str:
     raw = str(cwd or ".").strip()
     if not raw:
         raw = "."
@@ -45,7 +45,7 @@ def _normalize_cwd_for_compare(cwd: str | None) -> str:
     return os.path.normpath(expanded)
 
 
-def _build_session_title(title: Any, preview: Any, cwd: str | None) -> str:
+def _build_session_title(title: Any, preview: Any, cwd: Optional[str]) -> str:
     explicit = str(title or "").strip()
     if explicit:
         return explicit
@@ -56,7 +56,7 @@ def _build_session_title(title: Any, preview: Any, cwd: str | None) -> str:
     return leaf or "New thread"
 
 
-def _format_updated_at(value: Any) -> str | None:
+def _format_updated_at(value: Any) -> Optional[str]:
     if value is None:
         return None
     if isinstance(value, str) and value.strip():
@@ -224,11 +224,11 @@ class SessionManager:
         logger.info("Forked ACP session %s -> %s", session_id, new_id)
         return state
 
-    def list_sessions(self, cwd: str | None = None) -> List[Dict[str, Any]]:
+    def list_sessions(self, cwd: Optional[str] = None) -> List[Dict[str, Any]]:
         """Return lightweight info dicts for all sessions (memory + database)."""
         normalized_cwd = _normalize_cwd_for_compare(cwd) if cwd else None
         db = self._get_db()
-        persisted_rows: dict[str, dict[str, Any]] = {}
+        persisted_rows: Dict[str, dict[str, Any]] = {}
 
         if db is not None:
             try:
@@ -515,10 +515,10 @@ class SessionManager:
         *,
         session_id: str,
         cwd: str,
-        model: str | None = None,
-        requested_provider: str | None = None,
-        base_url: str | None = None,
-        api_mode: str | None = None,
+        model: Optional[str] = None,
+        requested_provider: Optional[str] = None,
+        base_url: Optional[str] = None,
+        api_mode: Optional[str] = None,
     ):
         if self._agent_factory is not None:
             return self._agent_factory()

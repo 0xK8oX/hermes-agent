@@ -26,7 +26,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from hermes_constants import get_hermes_home
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union, Set
 from urllib.parse import urlparse, urlunparse
 
 import httpx
@@ -1042,7 +1042,7 @@ class SkillsShSource(SkillSource):
         except httpx.HTTPError:
             return []
 
-        seen: set[str] = set()
+        seen: Set[str] = set()
         results: List[SkillMeta] = []
         for match in self._SKILL_LINK_RE.finditer(resp.text):
             canonical = match.group("id")
@@ -1271,7 +1271,7 @@ class SkillsShSource(SkillSource):
         return False
 
     @staticmethod
-    def _token_variants(value: Optional[str]) -> set[str]:
+    def _token_variants(value: Optional[str]) -> Set[str]:
         if not value:
             return set()
 
@@ -1497,7 +1497,7 @@ class ClawHubSource(SkillSource):
 
     @staticmethod
     def _dedupe_results(results: List[SkillMeta]) -> List[SkillMeta]:
-        seen: set[str] = set()
+        seen: Set[str] = set()
         deduped: List[SkillMeta] = []
         for result in results:
             key = (result.identifier or result.name).lower()
@@ -1529,7 +1529,7 @@ class ClawHubSource(SkillSource):
             else:
                 candidates.append(base_slug)
 
-        seen: set[str] = set()
+        seen: Set[str] = set()
         for candidate in candidates:
             if candidate in seen:
                 continue
@@ -1710,7 +1710,7 @@ class ClawHubSource(SkillSource):
 
         cursor: Optional[str] = None
         results: List[SkillMeta] = []
-        seen: set[str] = set()
+        seen: Set[str] = set()
         max_pages = 50
 
         for _ in range(max_pages):

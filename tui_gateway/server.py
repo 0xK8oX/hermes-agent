@@ -25,16 +25,17 @@ except Exception:
     pass
 
 from tui_gateway.render import make_stream_renderer, render_diff, render_message
+from typing import Optional, Tuple, List, Dict, Set
 
-_sessions: dict[str, dict] = {}
-_methods: dict[str, callable] = {}
-_pending: dict[str, tuple[str, threading.Event]] = {}
-_answers: dict[str, str] = {}
+_sessions: Dict[str, dict] = {}
+_methods: Dict[str, callable] = {}
+_pending: Dict[str, Tuple[str, threading.Event]] = {}
+_answers: Dict[str, str] = {}
 _db = None
 _stdout_lock = threading.Lock()
 _cfg_lock = threading.Lock()
-_cfg_cache: dict | None = None
-_cfg_mtime: float | None = None
+_cfg_cache: Optional[dict] = None
+_cfg_mtime: Optional[float] = None
 _SLASH_WORKER_TIMEOUT_S = max(5.0, float(os.environ.get("HERMES_TUI_SLASH_TIMEOUT_S", "45") or 45))
 
 # ── Async RPC dispatch (#12546) ──────────────────────────────────────
@@ -67,8 +68,8 @@ class _SlashWorker:
     def __init__(self, session_key: str, model: str):
         self._lock = threading.Lock()
         self._seq = 0
-        self.stderr_tail: list[str] = []
-        self.stdout_queue: queue.Queue[dict | None] = queue.Queue()
+        self.stderr_tail: List[str] = []
+        self.stdout_queue: queue.Queue[Optional[dict]] = queue.Queue()
 
         argv = [sys.executable, "-m", "tui_gateway.slash_worker", "--session-key", session_key]
         if model:
@@ -156,14 +157,14 @@ def write_json(obj: dict) -> bool:
         return False
 
 
-def _emit(event: str, sid: str, payload: dict | None = None):
+def _emit(event: str, sid: str, payload: Optional[dict] = None):
     params = {"type": event, "session_id": sid}
     if payload is not None:
         params["payload"] = payload
     write_json({"jsonrpc": "2.0", "method": "event", "params": params})
 
 
-def _status_update(sid: str, kind: str, text: str | None = None):
+def _status_update(sid: str, kind: str, text: Optional[str] = None):
     body = (text if text is not None else kind).strip()
     if not body:
         return
@@ -211,14 +212,14 @@ def method(name: str):
     return dec
 
 
-def handle_request(req: dict) -> dict | None:
+def handle_request(req: dict) -> Optional[dict]:
     fn = _methods.get(req.get("method", ""))
     if not fn:
         return _err(req.get("id"), -32601, f"unknown method: {req.get('method')}")
     return fn(req.get("id"), req.get("params", {}))
 
 
-def dispatch(req: dict) -> dict | None:
+def dispatch(req: dict) -> Optional[dict]:
     """Route inbound RPCs — long handlers to the pool, everything else inline.
 
     Returns a response dict when handled inline. Returns None when the
@@ -241,7 +242,7 @@ def dispatch(req: dict) -> dict | None:
     return None
 
 
-def _wait_agent(session: dict, rid: str, timeout: float = 30.0) -> dict | None:
+def _wait_agent(session: dict, rid: str, timeout: float = 30.0) -> Optional[dict]:
     ready = session.get("agent_ready")
     if ready is not None and not ready.wait(timeout=timeout):
         return _err(rid, 5032, "agent initialization timed out")
@@ -345,7 +346,7 @@ def _block(event: str, sid: str, payload: dict, timeout: int = 300) -> str:
     return _answers.pop(rid, "")
 
 
-def _clear_pending(sid: str | None = None) -> None:
+def _clear_pending(sid: Optional[str] = None) -> None:
     """Release pending prompts with an empty answer.
 
     When *sid* is provided, only prompts owned by that session are
@@ -404,14 +405,14 @@ def _write_config_key(key_path: str, value):
     _save_cfg(cfg)
 
 
-def _load_reasoning_config() -> dict | None:
+def _load_reasoning_config() -> Optional[dict]:
     from hermes_constants import parse_reasoning_effort
 
     effort = str(_load_cfg().get("agent", {}).get("reasoning_effort", "") or "").strip()
     return parse_reasoning_effort(effort)
 
 
-def _load_service_tier() -> str | None:
+def _load_service_tier() -> Optional[str]:
     raw = str(_load_cfg().get("agent", {}).get("service_tier", "") or "").strip().lower()
     if not raw or raw in {"normal", "default", "standard", "off", "none"}:
         return None
@@ -434,7 +435,7 @@ def _load_tool_progress_mode() -> str:
     return mode if mode in {"off", "new", "all", "verbose"} else "all"
 
 
-def _load_enabled_toolsets() -> list[str] | None:
+def _load_enabled_toolsets() -> Optional[List[str]]:
     try:
         from hermes_cli.config import load_config
         from hermes_cli.tools_config import _get_platform_tools
@@ -534,7 +535,7 @@ def _apply_model_switch(sid: str, session: dict, raw_input: str) -> dict:
     return {"value": result.new_model, "warning": result.warning_message or ""}
 
 
-def _compress_session_history(session: dict, focus_topic: str | None = None) -> tuple[int, dict]:
+def _compress_session_history(session: dict, focus_topic: Optional[str] = None) -> Tuple[int, dict]:
     from agent.model_metadata import estimate_messages_tokens_rough
 
     agent = session["agent"]
@@ -661,7 +662,7 @@ def _tool_ctx(name: str, args: dict) -> str:
         return ""
 
 
-def _fmt_tool_duration(seconds: float | None) -> str:
+def _fmt_tool_duration(seconds: Optional[float]) -> str:
     if seconds is None:
         return ""
     if seconds < 10:
@@ -672,7 +673,7 @@ def _fmt_tool_duration(seconds: float | None) -> str:
     return f"{mins}m {secs}s" if secs else f"{mins}m"
 
 
-def _count_list(obj: object, *path: str) -> int | None:
+def _count_list(obj: object, *path: str) -> Optional[int]:
     cur = obj
     for key in path:
         if not isinstance(cur, dict):
@@ -681,7 +682,7 @@ def _count_list(obj: object, *path: str) -> int | None:
     return len(cur) if isinstance(cur, list) else None
 
 
-def _tool_summary(name: str, result: str, duration_s: float | None) -> str | None:
+def _tool_summary(name: str, result: str, duration_s: Optional[float]) -> Optional[str]:
     try:
         data = json.loads(result)
     except Exception:
@@ -737,7 +738,7 @@ def _on_tool_complete(sid: str, tool_call_id: str, name: str, args: dict, result
     try:
         from agent.display import render_edit_diff_with_delta
 
-        rendered: list[str] = []
+        rendered: List[str] = []
         if render_edit_diff_with_delta(name, result, function_args=args, snapshot=snapshot, print_fn=rendered.append):
             payload["inline_diff"] = "\n".join(rendered)
     except Exception:
@@ -749,9 +750,9 @@ def _on_tool_complete(sid: str, tool_call_id: str, name: str, args: dict, result
 def _on_tool_progress(
     sid: str,
     event_type: str,
-    name: str | None = None,
-    preview: str | None = None,
-    _args: dict | None = None,
+    name: Optional[str] = None,
+    preview: Optional[str] = None,
+    _args: Optional[dict] = None,
     **_kwargs,
 ):
     if not _tool_progress_enabled(sid):
@@ -851,7 +852,7 @@ def _render_personality_prompt(value) -> str:
     return str(value)
 
 
-def _available_personalities(cfg: dict | None = None) -> dict:
+def _available_personalities(cfg: Optional[dict] = None) -> dict:
     try:
         from cli import load_cli_config
 
@@ -866,7 +867,7 @@ def _available_personalities(cfg: dict | None = None) -> dict:
             return cfg.get("agent", {}).get("personalities", {}) or {}
 
 
-def _validate_personality(value: str, cfg: dict | None = None) -> tuple[str, str]:
+def _validate_personality(value: str, cfg: Optional[dict] = None) -> Tuple[str, str]:
     raw = str(value or "").strip()
     name = raw.lower()
     if not name or name in ("none", "default", "neutral"):
@@ -886,7 +887,7 @@ def _validate_personality(value: str, cfg: dict | None = None) -> tuple[str, str
     return name, _render_personality_prompt(personalities[name])
 
 
-def _apply_personality_to_session(sid: str, session: dict, new_prompt: str) -> tuple[bool, dict | None]:
+def _apply_personality_to_session(sid: str, session: dict, new_prompt: str) -> Tuple[bool, Optional[dict]]:
     if not session:
         return False, None
 
@@ -959,7 +960,7 @@ def _reset_session_agent(sid: str, session: dict) -> dict:
     return info
 
 
-def _make_agent(sid: str, key: str, session_id: str | None = None):
+def _make_agent(sid: str, key: str, session_id: Optional[str] = None):
     from run_agent import AIAgent
     cfg = _load_cfg()
     system_prompt = cfg.get("agent", {}).get("system_prompt", "") or ""
@@ -1030,7 +1031,7 @@ def _resolve_checkpoint_hash(mgr, cwd: str, ref: str) -> str:
     raise ValueError(f"Invalid checkpoint number. Use 1-{len(checkpoints)}.")
 
 
-def _enrich_with_attached_images(user_text: str, image_paths: list[str]) -> str:
+def _enrich_with_attached_images(user_text: str, image_paths: List[str]) -> str:
     """Pre-analyze attached images via vision and prepend descriptions to user text."""
     import asyncio, json as _json
     from tools.vision_tools import vision_analyze_tool
@@ -1041,7 +1042,7 @@ def _enrich_with_attached_images(user_text: str, image_paths: list[str]) -> str:
         "and any other notable visual information."
     )
 
-    parts: list[str] = []
+    parts: List[str] = []
     for path in image_paths:
         p = Path(path)
         if not p.exists():
@@ -1062,7 +1063,7 @@ def _enrich_with_attached_images(user_text: str, image_paths: list[str]) -> str:
     return text or "What do you see in this image?"
 
 
-def _history_to_messages(history: list[dict]) -> list[dict]:
+def _history_to_messages(history: List[dict]) -> List[dict]:
     messages = []
     tool_call_args = {}
 
@@ -2084,7 +2085,7 @@ _TUI_HIDDEN: frozenset[str] = frozenset({
     "sethome", "set-home", "update", "commands", "status", "approve", "deny",
 })
 
-_TUI_EXTRA: list[tuple[str, str, str]] = [
+_TUI_EXTRA: List[Tuple[str, str, str]] = [
     ("/compact", "Toggle compact display mode", "TUI"),
     ("/logs", "Show recent gateway log lines", "TUI"),
 ]
@@ -2103,11 +2104,11 @@ def _(rid, params: dict) -> dict:
     try:
         from hermes_cli.commands import COMMAND_REGISTRY, SUBCOMMANDS, _build_description
 
-        all_pairs: list[list[str]] = []
-        canon: dict[str, str] = {}
-        categories: list[dict] = []
-        cat_map: dict[str, list[list[str]]] = {}
-        cat_order: list[str] = []
+        all_pairs: List[list[str]] = []
+        canon: Dict[str, str] = {}
+        categories: List[dict] = []
+        cat_map: Dict[str, List[list[str]]] = {}
+        cat_order: List[str] = []
 
         for cmd in COMMAND_REGISTRY:
             c = f"/{cmd.name}"
@@ -2188,7 +2189,7 @@ def _(rid, params: dict) -> dict:
         return _err(rid, 5020, str(e))
 
 
-def _cli_exec_blocked(argv: list[str]) -> str | None:
+def _cli_exec_blocked(argv: List[str]) -> Optional[str]:
     """Return user hint if this argv must not run headless in the gateway process."""
     if not argv:
         return "bare `hermes` is interactive — use `/hermes chat -q …` or run `hermes` in another terminal"
@@ -2209,7 +2210,7 @@ def _(rid, params: dict) -> dict:
     """Run `python -m hermes_cli.main` with argv; capture stdout/stderr (non-interactive only)."""
     argv = params.get("argv", [])
     if not isinstance(argv, list) or not all(isinstance(x, str) for x in argv):
-        return _err(rid, 4003, "argv must be list[str]")
+        return _err(rid, 4003, "argv must be List[str]")
     hint = _cli_exec_blocked(argv)
     if hint:
         return _ok(rid, {"blocked": True, "hint": hint, "code": -1, "output": ""})
@@ -2397,7 +2398,7 @@ def _(rid, params: dict) -> dict:
     if not word:
         return _ok(rid, {"items": []})
 
-    items: list[dict] = []
+    items: List[dict] = []
     try:
         is_context = word.startswith("@")
         query = word[1:] if is_context else word

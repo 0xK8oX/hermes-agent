@@ -57,7 +57,7 @@ def _error(message: str) -> dict:
     return {"error": _sanitize_error_text(message)}
 
 
-def _telegram_retry_delay(exc: Exception, attempt: int) -> float | None:
+def _telegram_retry_delay(exc: Exception, attempt: int) -> Optional[float]:
     retry_after = getattr(exc, "retry_after", None)
     if retry_after is not None:
         try:
@@ -419,7 +419,7 @@ def _get_cron_auto_delivery_target():
     }
 
 
-def _maybe_skip_cron_duplicate_send(platform_name: str, chat_id: str, thread_id: str | None):
+def _maybe_skip_cron_duplicate_send(platform_name: str, chat_id: str, thread_id: Optional[str]):
     """Skip redundant cron send_message calls when the scheduler will auto-deliver there."""
     auto_target = _get_cron_auto_delivery_target()
     if not auto_target:

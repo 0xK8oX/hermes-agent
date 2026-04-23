@@ -337,30 +337,40 @@ def _apply_binding_unlocked(session_key: str, binding: dict, preloaded_meta: Opt
             )
 
     # Store model override (keep raw api_key for safe /bind save)
-    if model:
-        raw_api_key = binding.get("api_key")
-        resolved_base_url = binding.get("base_url")
-        resolved_provider = binding.get("provider")
-        resolved_api_mode = None
+    model = binding.get("model")
+    raw_api_key = binding.get("api_key")
+    resolved_base_url = binding.get("base_url")
+    if resolved_base_url:
+        resolved_base_url = os.path.expandvars(resolved_base_url)
+    resolved_provider = binding.get("provider")
+    resolved_api_mode = None
 
-        # Auto-resolve base_url from custom_providers config when provider
-        # uses the ``custom:<name>`` format but no explicit base_url is set.
-        if not resolved_base_url and resolved_provider and str(resolved_provider).startswith("custom:"):
-            try:
-                from hermes_cli.runtime_provider import _get_named_custom_provider
-                cp = _get_named_custom_provider(str(resolved_provider))
-                if cp:
-                    resolved_base_url = resolved_base_url or cp.get("base_url")
-                    resolved_api_mode = resolved_api_mode or cp.get("api_mode")
-                    if not _expand_api_key(raw_api_key):
-                        raw_api_key = raw_api_key or cp.get("api_key")
-            except Exception as _cp_err:
-                logger.debug("[ChannelBinding] custom provider resolve failed: %s", _cp_err)
+    # Always expand api_key regardless of whether we have a model override
+    # This fixes 401 when soul has api_key env var but no model override
+    expanded_api_key = _expand_api_key(raw_api_key)
 
+    # Auto-resolve base_url from custom_providers config when provider
+    # uses the ``custom:<name>`` format but no explicit base_url is set.
+    if not resolved_base_url and resolved_provider and str(resolved_provider).startswith("custom:"):
+        try:
+            from hermes_cli.runtime_provider import _get_named_custom_provider
+            cp = _get_named_custom_provider(str(resolved_provider))
+            if cp:
+                resolved_base_url = resolved_base_url or cp.get("base_url")
+                if resolved_base_url:
+                    resolved_base_url = os.path.expandvars(resolved_base_url)
+                resolved_api_mode = resolved_api_mode or cp.get("api_mode")
+                if not expanded_api_key:
+                    raw_api_key = raw_api_key or cp.get("api_key")
+                    expanded_api_key = _expand_api_key(raw_api_key)
+        except Exception as _cp_err:
+            logger.debug("[ChannelBinding] custom provider resolve failed: %s", _cp_err)
+
+    if model or expanded_api_key or resolved_provider or resolved_base_url:
         _session_model_overrides[session_key] = {
             "model": model,
             "provider": resolved_provider,
-            "api_key": _expand_api_key(raw_api_key),
+            "api_key": expanded_api_key,
             "api_key_raw": raw_api_key,
             "base_url": resolved_base_url,
             "api_mode": resolved_api_mode,
@@ -1013,15 +1023,18 @@ def _get_cron_binding(origin: dict) -> Optional[dict]:
                 result["model"] = mo["model"]
             if mo.get("provider"):
                 result["provider"] = mo["provider"]
-            # Use api_key_raw (${ENV_VAR} reference) instead of the expanded
-            # plaintext secret — let the consumer expand at point of use.
-            raw_key = mo.get("api_key_raw")
-            if raw_key:
-                result["api_key"] = raw_key
-            elif mo.get("api_key"):
-                result["api_key"] = mo["api_key"]
+            # Prefer expanded key; fall back to raw + expand at read time.
+            # api_key_raw stores the original ${VAR} for safe /bind save,
+            # but callers (Anthropic SDK etc.) need the real key.
+            expanded = mo.get("api_key")
+            if expanded:
+                result["api_key"] = expanded
+            else:
+                raw_key = mo.get("api_key_raw")
+                if raw_key:
+                    result["api_key"] = _expand_api_key(raw_key) or raw_key
             if mo.get("base_url"):
-                result["base_url"] = mo["base_url"]
+                result["base_url"] = os.path.expandvars(mo["base_url"])
         soul = _session_souls.get(key)
         if soul:
             result["soul_content"] = soul
@@ -1081,13 +1094,18 @@ def _get_session_overrides(session_key: str) -> Optional[dict]:
                 result["model"] = mo["model"]
             if mo.get("provider"):
                 result["provider"] = mo["provider"]
-            raw_key = mo.get("api_key_raw")
-            if raw_key:
-                result["api_key"] = raw_key
-            elif mo.get("api_key"):
-                result["api_key"] = mo["api_key"]
+            # Prefer expanded key; fall back to raw + expand at read time.
+            # api_key_raw stores the original ${VAR} for safe /bind save,
+            # but callers (Anthropic SDK etc.) need the real key.
+            expanded = mo.get("api_key")
+            if expanded:
+                result["api_key"] = expanded
+            else:
+                raw_key = mo.get("api_key_raw")
+                if raw_key:
+                    result["api_key"] = _expand_api_key(raw_key) or raw_key
             if mo.get("base_url"):
-                result["base_url"] = mo["base_url"]
+                result["base_url"] = os.path.expandvars(mo["base_url"])
             if mo.get("api_mode"):
                 result["api_mode"] = mo["api_mode"]
 
@@ -1492,7 +1510,7 @@ async def handle_bind_command(session_store, event) -> str:
         if meta.get("provider"):
             binding["provider"] = meta["provider"]
         if meta.get("base_url"):
-            binding["base_url"] = meta["base_url"]
+            binding["base_url"] = os.path.expandvars(meta["base_url"])
         if meta.get("api_key"):
             binding["api_key"] = meta["api_key"]
 
@@ -1504,7 +1522,8 @@ async def handle_bind_command(session_store, event) -> str:
         # instance — the gateway's _handle_bind_command wrapper will pick this
         # up and call _perform_session_reset().
         # Uses side-channel instead of event.extra to avoid modifying MessageEvent.
-        set_bind_reset(channel_id)
+        if parsed and parsed.get("channel_id"):
+            set_bind_reset(parsed["channel_id"])
 
         extras = []
         if binding.get("memory_scope"):

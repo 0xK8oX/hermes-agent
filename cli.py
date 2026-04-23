@@ -28,7 +28,7 @@ import textwrap
 from contextlib import contextmanager
 from pathlib import Path
 from datetime import datetime
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple, Set
 
 logger = logging.getLogger(__name__)
 
@@ -183,7 +183,7 @@ def _load_prefill_messages(file_path: str) -> List[Dict[str, Any]]:
         return []
 
 
-def _parse_reasoning_config(effort: str) -> dict | None:
+def _parse_reasoning_config(effort: str) -> Optional[dict]:
     """Parse a reasoning effort level into an OpenRouter reasoning config dict."""
     from hermes_constants import parse_reasoning_effort
     result = parse_reasoning_effort(effort)
@@ -192,7 +192,7 @@ def _parse_reasoning_config(effort: str) -> dict | None:
     return result
 
 
-def _parse_service_tier_config(raw: str) -> str | None:
+def _parse_service_tier_config(raw: str) -> Optional[str]:
     """Parse a persisted service-tier preference into a Responses API value."""
     value = str(raw or "").strip().lower()
     if not value or value in {"normal", "default", "standard", "off", "none"}:
@@ -204,12 +204,12 @@ def _parse_service_tier_config(raw: str) -> str | None:
 
 
 
-def _get_chrome_debug_candidates(system: str) -> list[str]:
+def _get_chrome_debug_candidates(system: str) -> List[str]:
     """Return likely browser executables for local CDP auto-launch."""
-    candidates: list[str] = []
-    seen: set[str] = set()
+    candidates: List[str] = []
+    seen: Set[str] = set()
 
-    def _add_candidate(path: str | None) -> None:
+    def _add_candidate(path: Optional[str]) -> None:
         if not path:
             return
         normalized = os.path.normcase(os.path.normpath(path))
@@ -1094,7 +1094,7 @@ class _SkinAwareAnsi:
         self._skin_key = skin_key
         self._fallback_hex = fallback_hex
         self._bold = bold
-        self._cached: str | None = None
+        self._cached: Optional[str] = None
 
     def __str__(self) -> str:
         if self._cached is None:
@@ -1215,7 +1215,7 @@ def _termux_example_image_path(filename: str = "cat.png") -> str:
     return os.path.join("~/storage/shared", "Pictures", filename)
 
 
-def _split_path_input(raw: str) -> tuple[str, str]:
+def _split_path_input(raw: str) -> Tuple[str, str]:
     r"""Split a leading file path token from trailing free-form text.
 
     Supports quoted paths and backslash-escaped spaces so callers can accept
@@ -1294,7 +1294,7 @@ def _resolve_attachment_path(raw_path: str) -> Path | None:
     return resolved
 
 
-def _format_process_notification(evt: dict) -> "str | None":
+def _format_process_notification(evt: dict) -> "Optional[str]":
     """Format a process notification event into a [SYSTEM: ...] message.
 
     Handles both completion events (notify_on_complete) and watch pattern
@@ -1333,7 +1333,7 @@ def _format_process_notification(evt: dict) -> "str | None":
     )
 
 
-def _detect_file_drop(user_input: str) -> "dict | None":
+def _detect_file_drop(user_input: str) -> "Optional[dict]":
     """Detect if *user_input* starts with a real local file path.
 
     This catches dragged/pasted paths before they are mistaken for slash
@@ -1383,7 +1383,7 @@ def _detect_file_drop(user_input: str) -> "dict | None":
     }
 
 
-def _format_image_attachment_badges(attached_images: list[Path], image_counter: int, width: int | None = None) -> str:
+def _format_image_attachment_badges(attached_images: List[Path], image_counter: int, width: Optional[int] = None) -> str:
     """Format the attached-image badge row for the interactive CLI.
 
     Narrow terminals such as Termux should get a compact summary that fits on a
@@ -1421,10 +1421,10 @@ def _should_auto_attach_clipboard_image_on_paste(pasted_text: str) -> bool:
     return not pasted_text.strip()
 
 
-def _collect_query_images(query: str | None, image_arg: str | None = None) -> tuple[str, list[Path]]:
+def _collect_query_images(query: Optional[str], image_arg: Optional[str] = None) -> Tuple[str, List[Path]]:
     """Collect local image attachments for single-query CLI flows."""
     message = query or ""
-    images: list[Path] = []
+    images: List[Path] = []
 
     if isinstance(message, str):
         dropped = _detect_file_drop(message)
@@ -1440,8 +1440,8 @@ def _collect_query_images(query: str | None, image_arg: str | None = None) -> tu
             raise ValueError(f"Not a supported image file: {explicit_path}")
         images.append(explicit_path)
 
-    deduped: list[Path] = []
-    seen: set[str] = set()
+    deduped: List[Path] = []
+    seen: Set[str] = set()
     for img in images:
         key = str(img)
         if key in seen:
@@ -1609,7 +1609,7 @@ def _get_plugin_cmd_handler_names() -> set:
         return set()
 
 
-def _parse_skills_argument(skills: str | list[str] | tuple[str, ...] | None) -> list[str]:
+def _parse_skills_argument(skills: str | List[str] | Tuple[str, ...] | None) -> List[str]:
     """Normalize a CLI skills flag into a deduplicated list of skill identifiers."""
     if not skills:
         return []
@@ -1621,8 +1621,8 @@ def _parse_skills_argument(skills: str | list[str] | tuple[str, ...] | None) -> 
     else:
         raw_values = [str(skills)]
 
-    parsed: list[str] = []
-    seen: set[str] = set()
+    parsed: List[str] = []
+    seen: Set[str] = set()
     for raw in raw_values:
         for part in raw.split(","):
             normalized = part.strip()
@@ -1827,7 +1827,7 @@ class HermesCLI:
         self.provider = self.requested_provider
         self.api_mode = "chat_completions"
         self.acp_command: Optional[str] = None
-        self.acp_args: list[str] = []
+        self.acp_args: List[str] = []
         self.base_url = (
             base_url
             or CLI_CONFIG["model"].get("base_url", "")
@@ -1976,9 +1976,9 @@ class HermesCLI:
         self._last_scrollback_tool: str = ""  # last tool name printed to scrollback (for "new" dedup)
         self._command_running = False
         self._command_status = ""
-        self._attached_images: list[Path] = []
+        self._attached_images: List[Path] = []
         self._image_counter = 0
-        self.preloaded_skills: list[str] = []
+        self.preloaded_skills: List[str] = []
         self._startup_skills_line_shown = False
 
         # Voice mode state (also reinitialized inside run() for interactive TUI).
@@ -2166,7 +2166,7 @@ class HermesCLI:
         return "".join(out).rstrip() + ellipsis
 
     @staticmethod
-    def _get_tui_terminal_width(default: tuple[int, int] = (80, 24)) -> int:
+    def _get_tui_terminal_width(default: Tuple[int, int] = (80, 24)) -> int:
         """Return the live prompt_toolkit width, falling back to ``shutil``.
 
         The TUI layout can be narrower than ``shutil.get_terminal_size()`` reports,
@@ -2593,7 +2593,7 @@ class HermesCLI:
         preview_lines.extend(f"[bold]{_escape(line)}[/]" for line in tail)
         return "\n".join(preview_lines)
 
-    def _expand_paste_references(self, text: str | None) -> str:
+    def _expand_paste_references(self, text: Optional[str]) -> str:
         """Expand [Pasted text #N -> file] placeholders into file contents."""
         if not isinstance(text, str) or "[Pasted text #" not in text:
             return text or ""
@@ -3124,7 +3124,7 @@ class HermesCLI:
         route["request_overrides"] = overrides
         return route
 
-    def _init_agent(self, *, model_override: str = None, runtime_override: dict = None, request_overrides: dict | None = None) -> bool:
+    def _init_agent(self, *, model_override: str = None, runtime_override: dict = None, request_overrides: Optional[dict] = None) -> bool:
         """
         Initialize the agent on first use.
         When resuming a session, restores conversation history from SQLite.
@@ -3679,7 +3679,7 @@ class HermesCLI:
         else:
             print(f"  ❌ {result['error']}")
 
-    def _resolve_checkpoint_ref(self, ref: str, checkpoints: list) -> str | None:
+    def _resolve_checkpoint_ref(self, ref: str, checkpoints: list) -> Optional[str]:
         """Resolve a checkpoint number or hash to a full commit hash."""
         try:
             idx = int(ref) - 1  # 1-indexed for user
@@ -4372,7 +4372,7 @@ class HermesCLI:
         print(f"  Config File: {config_path} {config_status}")
         print()
     
-    def _list_recent_sessions(self, limit: int = 10) -> list[dict[str, Any]]:
+    def _list_recent_sessions(self, limit: int = 10) -> List[Dict[str, Any]]:
         """Return recent CLI sessions for in-chat browsing/resume affordances."""
         if not self._session_db:
             return []
@@ -4831,7 +4831,7 @@ class HermesCLI:
         remaining = len(self.conversation_history)
         print(f"  {remaining} message(s) remaining in history.")
     
-    def _run_curses_picker(self, title: str, items: list[str], default_index: int = 0) -> int | None:
+    def _run_curses_picker(self, title: str, items: List[str], default_index: int = 0) -> Optional[int]:
         """Run curses_single_select via run_in_terminal so prompt_toolkit handles terminal ownership cleanly."""
         import threading
         from hermes_cli.curses_ui import curses_single_select
@@ -4861,7 +4861,7 @@ class HermesCLI:
 
         return result[0]
 
-    def _prompt_text_input(self, prompt_text: str) -> str | None:
+    def _prompt_text_input(self, prompt_text: str) -> Optional[str]:
         """Prompt for free-text input safely inside or outside prompt_toolkit."""
         result = [None]
 
@@ -4914,7 +4914,7 @@ class HermesCLI:
         reserved_below: int = 6,
         panel_chrome: int = 6,
         min_visible: int = 3,
-    ) -> tuple[int, int]:
+    ) -> Tuple[int, int]:
         """Resolve (scroll_offset, visible) for the /model picker viewport.
 
         ``reserved_below`` matches the approval / clarify panels — input area,
@@ -7891,7 +7891,7 @@ class HermesCLI:
             _cprint(f"\n{_DIM}  ⏱ Timeout — denying command{_RST}")
             return "deny"
 
-    def _approval_choices(self, command: str, *, allow_permanent: bool = True) -> list[str]:
+    def _approval_choices(self, command: str, *, allow_permanent: bool = True) -> List[str]:
         """Return approval choices for a dangerous command prompt."""
         choices = ["once", "session", "always", "deny"] if allow_permanent else ["once", "session", "deny"]
         if len(command) > 70:
@@ -7936,13 +7936,13 @@ class HermesCLI:
         if not state:
             return []
 
-        def _panel_box_width(title_text: str, content_lines: list[str], min_width: int = 46, max_width: int = 76) -> int:
+        def _panel_box_width(title_text: str, content_lines: List[str], min_width: int = 46, max_width: int = 76) -> int:
             term_cols = shutil.get_terminal_size((100, 20)).columns
             longest = max([len(title_text)] + [len(line) for line in content_lines] + [min_width - 4])
             inner = min(max(longest + 4, min_width - 2), max_width - 2, max(24, term_cols - 6))
             return inner + 2
 
-        def _wrap_panel_text(text: str, width: int, subsequent_indent: str = "") -> list[str]:
+        def _wrap_panel_text(text: str, width: int, subsequent_indent: str = "") -> List[str]:
             wrapped = textwrap.wrap(
                 text,
                 width=max(8, width),
@@ -7994,7 +7994,7 @@ class HermesCLI:
         cmd_wrapped = _wrap_panel_text(cmd_display, inner_text_width)
 
         # (choice_index, wrapped_line) so we can re-apply selected styling below
-        choice_wrapped: list[tuple[int, str]] = []
+        choice_wrapped: List[Tuple[int, str]] = []
         for i, choice in enumerate(choices):
             label = choice_labels.get(choice, choice)
             prefix = '❯ ' if i == selected else '  '
@@ -8669,7 +8669,7 @@ class HermesCLI:
                 goodbye = "Goodbye! ⚕"
             print(goodbye)
 
-    def _get_tui_prompt_symbols(self) -> tuple[str, str]:
+    def _get_tui_prompt_symbols(self) -> Tuple[str, str]:
         """Return ``(normal_prompt, state_suffix)`` for the active skin.
 
         ``normal_prompt`` is the full ``branding.prompt_symbol``.
@@ -8762,7 +8762,7 @@ class HermesCLI:
         """Return the visible prompt text for width calculations."""
         return "".join(text for _, text in self._get_tui_prompt_fragments())
 
-    def _build_tui_style_dict(self) -> dict[str, str]:
+    def _build_tui_style_dict(self) -> Dict[str, str]:
         """Layer the active skin's prompt_toolkit colors over the base TUI style."""
         style_dict = dict(getattr(self, "_tui_style_base", {}) or {})
         try:
@@ -8947,7 +8947,7 @@ class HermesCLI:
         self._secret_deadline = 0
 
         # Clipboard image attachments (paste images into the CLI)
-        self._attached_images: list[Path] = []
+        self._attached_images: List[Path] = []
         self._image_counter = 0
 
         # Voice mode state (protected by _voice_lock for cross-thread access)
@@ -9735,14 +9735,14 @@ class HermesCLI:
 
         # --- Clarify tool: dynamic display widget for questions + choices ---
 
-        def _panel_box_width(title: str, content_lines: list[str], min_width: int = 46, max_width: int = 76) -> int:
+        def _panel_box_width(title: str, content_lines: List[str], min_width: int = 46, max_width: int = 76) -> int:
             """Choose a stable panel width wide enough for the title and content."""
             term_cols = shutil.get_terminal_size((100, 20)).columns
             longest = max([len(title)] + [len(line) for line in content_lines] + [min_width - 4])
             inner = min(max(longest + 4, min_width - 2), max_width - 2, max(24, term_cols - 6))
             return inner + 2  # account for the single leading/trailing spaces inside borders
 
-        def _wrap_panel_text(text: str, width: int, subsequent_indent: str = "") -> list[str]:
+        def _wrap_panel_text(text: str, width: int, subsequent_indent: str = "") -> List[str]:
             wrapped = textwrap.wrap(
                 text,
                 width=max(8, width),
@@ -9790,7 +9790,7 @@ class HermesCLI:
             inner_text_width = max(8, box_width - 2)
 
             # Pre-wrap choices + Other option — these are mandatory.
-            choice_wrapped: list[tuple[int, str]] = []
+            choice_wrapped: List[Tuple[int, str]] = []
             if choices:
                 for i, choice in enumerate(choices):
                     prefix = '❯ ' if i == selected and not cli_ref._clarify_freetext else '  '
@@ -10555,7 +10555,7 @@ def main(
     q: str = None,
     image: str = None,
     toolsets: str = None,
-    skills: str | list[str] | tuple[str, ...] = None,
+    skills: str | List[str] | Tuple[str, ...] = None,
     model: str = None,
     provider: str = None,
     api_key: str = None,

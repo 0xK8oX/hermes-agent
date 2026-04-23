@@ -20,6 +20,7 @@ import sys
 from pathlib import Path
 
 from hermes_constants import is_wsl as _is_wsl
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -251,7 +252,7 @@ def _powershell_save_image(exe: str, dest: Path, *, timeout: int, label: str) ->
 # or ``pwsh`` (PowerShell 7+, optional).  Discovery is cached per-process.
 
 
-def _find_powershell() -> str | None:
+def _find_powershell() -> Optional[str]:
     """Return the first available PowerShell executable, or None."""
     for name in ("powershell", "pwsh"):
         try:
@@ -269,10 +270,10 @@ def _find_powershell() -> str | None:
 
 
 # Cache the resolved PowerShell executable (checked once per process)
-_ps_exe: str | None | bool = False  # False = not yet checked
+_ps_exe: Optional[str] | bool = False  # False = not yet checked
 
 
-def _get_ps_exe() -> str | None:
+def _get_ps_exe() -> Optional[str]:
     global _ps_exe
     if _ps_exe is False:
         _ps_exe = _find_powershell()

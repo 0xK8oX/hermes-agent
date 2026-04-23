@@ -27,17 +27,21 @@ MAX_SESSION_CHARS = 100_000
 MAX_SUMMARY_TOKENS = 10000
 
 
-def _get_session_search_max_concurrency(default: int = 3) -> int:
-    """Read auxiliary.session_search.max_concurrency with sane bounds."""
+def _get_session_search_config() -> Dict[str, Any]:
+    """Read auxiliary.session_search config dict, returning {} on error."""
     try:
         from hermes_cli.config import load_config
         config = load_config()
     except ImportError:
-        return default
+        return {}
     aux = config.get("auxiliary", {}) if isinstance(config, dict) else {}
     task_config = aux.get("session_search", {}) if isinstance(aux, dict) else {}
-    if not isinstance(task_config, dict):
-        return default
+    return task_config if isinstance(task_config, dict) else {}
+
+
+def _get_session_search_max_concurrency(default: int = 3) -> int:
+    """Read auxiliary.session_search.max_concurrency with sane bounds."""
+    task_config = _get_session_search_config()
     raw = task_config.get("max_concurrency")
     if raw is None:
         return default
@@ -46,6 +50,19 @@ def _get_session_search_max_concurrency(default: int = 3) -> int:
     except (TypeError, ValueError):
         return default
     return max(1, min(value, 5))
+
+
+def _get_use_llm_summary(default: bool = True) -> bool:
+    """Read auxiliary.session_search.use_llm_summary. Defaults to True."""
+    task_config = _get_session_search_config()
+    raw = task_config.get("use_llm_summary")
+    if raw is None:
+        return default
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, str):
+        return raw.strip().lower() not in ("false", "0", "no", "off", "disabled")
+    return bool(raw)
 
 
 def _format_timestamp(ts: Union[int, float, str, None]) -> str:
@@ -129,7 +146,7 @@ def _truncate_around_matches(
 
     text_lower = full_text.lower()
     query_lower = query.lower().strip()
-    match_positions: list[int] = []
+    match_positions: List[int] = []
 
     # --- 1. Full-phrase search ------------------------------------------------
     phrase_pat = re.compile(re.escape(query_lower))
@@ -140,7 +157,7 @@ def _truncate_around_matches(
         terms = query_lower.split()
         if len(terms) > 1:
             # Collect every occurrence of each term
-            term_positions: dict[str, list[int]] = {}
+            term_positions: Dict[str, List[int]] = {}
             for t in terms:
                 term_positions[t] = [
                     m.start() for m in re.finditer(re.escape(t), text_lower)
@@ -435,6 +452,10 @@ def session_search(
             if len(seen_sessions) >= limit:
                 break
 
+        # Read config toggles once — shared across sync and async paths
+        use_llm_summary = _get_use_llm_summary()
+        max_raw_chars = 5000  # Fallback raw text cap when LLM is off or fails
+
         # Prepare all sessions for parallel summarization
         tasks = []
         for session_id, match_info in seen_sessions.items():
@@ -456,12 +477,21 @@ def session_search(
 
         # Summarize all sessions in parallel
         async def _summarize_all() -> List[Union[str, Exception]]:
-            """Summarize all sessions with bounded concurrency."""
+            """Summarize all sessions with bounded concurrency.
+
+            When use_llm_summary=False the LLM call is skipped entirely and
+            each task returns None so the output assembly falls back to raw
+            text — no API latency, no auth issues, no hang risk.
+            """
             max_concurrency = min(_get_session_search_max_concurrency(), max(1, len(tasks)))
             semaphore = asyncio.Semaphore(max_concurrency)
 
             async def _bounded_summary(text: str, meta: Dict[str, Any]) -> Optional[str]:
                 async with semaphore:
+                    if not use_llm_summary:
+                        # Toggle disabled — skip LLM entirely, return None to
+                        # trigger raw-text fallback in the assembly loop below.
+                        return None
                     return await _summarize_session(text, query, meta)
 
             coros = [
@@ -481,13 +511,12 @@ def session_search(
             results = _run_async(_summarize_all())
         except concurrent.futures.TimeoutError:
             logging.warning(
-                "Session summarization timed out after 60 seconds",
+                "Session summarization timed out after 60 seconds — falling back to raw text",
                 exc_info=True,
             )
-            return json.dumps({
-                "success": False,
-                "error": "Session summarization timed out. Try a more specific query or reduce the limit.",
-            }, ensure_ascii=False)
+            # Timeout — mark every task as None so the assembly loop uses
+            # raw text instead of returning an error and abandoning results.
+            results = [None] * len(tasks)
 
         summaries = []
         for (session_id, match_info, conversation_text, _), result in zip(tasks, results):
@@ -507,11 +536,20 @@ def session_search(
 
             if result:
                 entry["summary"] = result
+                entry["mode"] = "llm_summary"
             else:
-                # Fallback: raw preview so matched sessions aren't silently
-                # dropped when the summarizer is unavailable (fixes #3409).
-                preview = (conversation_text[:500] + "\n…[truncated]") if conversation_text else "No preview available."
-                entry["summary"] = f"[Raw preview — summarization unavailable]\n{preview}"
+                # Fallback: return a generous chunk of the raw conversation so
+                # results are never silently dropped when LLM is unavailable,
+                # disabled, or the call raised an exception (fixes #3409).
+                preview = (
+                    conversation_text[:max_raw_chars]
+                    + ("\n…[truncated]" if len(conversation_text) > max_raw_chars else "")
+                ) if conversation_text else "No preview available."
+                if use_llm_summary:
+                    entry["summary"] = f"[Raw preview — LLM unavailable]\\n{preview}"
+                else:
+                    entry["summary"] = f"[Raw — use_llm_summary=false]\\n{preview}"
+                entry["mode"] = "raw"
 
             summaries.append(entry)
 
@@ -521,6 +559,7 @@ def session_search(
             "results": summaries,
             "count": len(summaries),
             "sessions_searched": len(seen_sessions),
+            "use_llm_summary": use_llm_summary,
         }, ensure_ascii=False)
 
     except Exception as e:
@@ -547,7 +586,10 @@ SESSION_SEARCH_SCHEMA = {
         "Returns titles, previews, and timestamps. Zero LLM cost, instant. "
         "Start here when the user asks what were we working on or what did we do recently.\n"
         "2. Keyword search (with query): Search for specific topics across all past sessions. "
-        "Returns LLM-generated summaries of matching sessions.\n\n"
+        "Returns LLM-generated summaries of matching sessions. "
+        "LLM summarization can be disabled via auxiliary.session_search.use_llm_summary "
+        "in config.yaml — when disabled (or if the LLM is unavailable), results fall back "
+        "to raw conversation excerpts so searches always return something useful.\n\n"
         "USE THIS PROACTIVELY when:\n"
         "- The user says 'we did this before', 'remember when', 'last time', 'as I mentioned'\n"
         "- The user asks about a topic you worked on before but don't have in current context\n"

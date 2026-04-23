@@ -30,6 +30,7 @@ import sys
 from datetime import datetime, timedelta, timezone
 from email.mime.text import MIMEText
 from pathlib import Path
+from typing import Optional, List, Dict
 
 HERMES_HOME = Path(os.getenv("HERMES_HOME", Path.home() / ".hermes"))
 TOKEN_PATH = HERMES_HOME / "google_token.json"
@@ -61,7 +62,7 @@ def _ensure_authenticated():
         sys.exit(1)
 
 
-def _stored_token_scopes() -> list[str]:
+def _stored_token_scopes() -> List[str]:
     try:
         data = json.loads(TOKEN_PATH.read_text())
     except Exception:
@@ -72,20 +73,20 @@ def _stored_token_scopes() -> list[str]:
     return list(SCOPES)
 
 
-def _gws_binary() -> str | None:
+def _gws_binary() -> Optional[str]:
     override = os.getenv("HERMES_GWS_BIN")
     if override:
         return override
     return shutil.which("gws")
 
 
-def _gws_env() -> dict[str, str]:
+def _gws_env() -> Dict[str, str]:
     env = os.environ.copy()
     env["GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE"] = str(TOKEN_PATH)
     return env
 
 
-def _run_gws(parts: list[str], *, params: dict | None = None, body: dict | None = None):
+def _run_gws(parts: List[str], *, params: Optional[dict] = None, body: Optional[dict] = None):
     binary = _gws_binary()
     if not binary:
         raise RuntimeError("gws not installed")
@@ -121,7 +122,7 @@ def _run_gws(parts: list[str], *, params: dict | None = None, body: dict | None 
         sys.exit(1)
 
 
-def _headers_dict(msg: dict) -> dict[str, str]:
+def _headers_dict(msg: dict) -> Dict[str, str]:
     return {h["name"]: h["value"] for h in msg.get("payload", {}).get("headers", [])}
 
 

@@ -6,6 +6,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import hermes_cli.gateway as gateway_cli
+from typing import List
+
 from gateway.restart import (
     DEFAULT_GATEWAY_RESTART_DRAIN_TIMEOUT,
     GATEWAY_SERVICE_RESTART_EXIT_CODE,
@@ -1386,7 +1388,7 @@ class TestRemoveLegacyHermesUnits:
             lambda: [(False, user_dir), (True, system_dir)],
         )
         # Mock systemctl — return success for everything
-        systemctl_calls: list[list[str]] = []
+        systemctl_calls: List[list[str]] = []
 
         def fake_run(cmd, **kwargs):
             systemctl_calls.append(cmd)

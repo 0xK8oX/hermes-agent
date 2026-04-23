@@ -2237,7 +2237,7 @@ def warn_deprecated_cwd_env_vars(config: Optional[Dict[str, Any]] = None) -> Non
     # Only warn if config.yaml doesn't have an explicit path
     config_has_explicit_cwd = config_cwd not in (".", "auto", "cwd", "")
 
-    lines: list[str] = []
+    lines: List[str] = []
     if messaging_cwd:
         lines.append(
             f"  \033[33m⚠\033[0m MESSAGING_CWD={messaging_cwd} found in .env — "
@@ -3125,7 +3125,7 @@ def _sanitize_env_lines(lines: list) -> list:
     # Done inside the function so OPTIONAL_ENV_VARS is guaranteed to be defined.
     known_keys = set(OPTIONAL_ENV_VARS.keys()) | _EXTRA_ENV_KEYS
 
-    sanitized: list[str] = []
+    sanitized: List[str] = []
     for line in lines:
         raw = line.rstrip("\r\n")
         stripped = raw.strip()
@@ -3225,7 +3225,7 @@ def _check_non_ascii_credential(key: str, value: str) -> str:
         pass
 
     # Build a readable list of the offending characters
-    bad_chars: list[str] = []
+    bad_chars: List[str] = []
     for i, ch in enumerate(value):
         if ord(ch) > 127:
             bad_chars.append(f"  position {i}: {ch!r} (U+{ord(ch):04X})")

@@ -12,7 +12,7 @@ import shutil
 import subprocess
 import sys
 import uuid
-from typing import Optional
+from typing import Optional, List, Dict, Set
 
 from tools.environments.base import BaseEnvironment, _popen_bash
 from tools.environments.local import _HERMES_PROVIDER_ENV_BLOCKLIST
@@ -33,10 +33,10 @@ _docker_executable: Optional[str] = None  # resolved once, cached
 _ENV_VAR_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
-def _normalize_forward_env_names(forward_env: list[str] | None) -> list[str]:
+def _normalize_forward_env_names(forward_env: Optional[List[str]]) -> List[str]:
     """Return a deduplicated list of valid environment variable names."""
-    normalized: list[str] = []
-    seen: set[str] = set()
+    normalized: List[str] = []
+    seen: Set[str] = set()
 
     for item in forward_env or []:
         if not isinstance(item, str):
@@ -58,7 +58,7 @@ def _normalize_forward_env_names(forward_env: list[str] | None) -> list[str]:
     return normalized
 
 
-def _normalize_env_dict(env: dict | None) -> dict[str, str]:
+def _normalize_env_dict(env: Optional[dict]) -> Dict[str, str]:
     """Validate and normalize a docker_env dict to {str: str}.
 
     Filters out entries with invalid variable names or non-string values.
@@ -69,7 +69,7 @@ def _normalize_env_dict(env: dict | None) -> dict[str, str]:
         logger.warning("docker_env is not a dict: %r", env)
         return {}
 
-    normalized: dict[str, str] = {}
+    normalized: Dict[str, str] = {}
     for key, value in env.items():
         if not isinstance(key, str) or not _ENV_VAR_NAME_RE.match(key.strip()):
             logger.warning("Ignoring invalid docker_env key: %r", key)
@@ -88,7 +88,7 @@ def _normalize_env_dict(env: dict | None) -> dict[str, str]:
     return normalized
 
 
-def _load_hermes_env_vars() -> dict[str, str]:
+def _load_hermes_env_vars() -> Dict[str, str]:
     """Load ~/.hermes/.env values without failing Docker command execution."""
     try:
         from hermes_cli.config import load_env
@@ -255,8 +255,8 @@ class DockerEnvironment(BaseEnvironment):
         persistent_filesystem: bool = False,
         task_id: str = "default",
         volumes: list = None,
-        forward_env: list[str] | None = None,
-        env: dict | None = None,
+        forward_env: Optional[List[str]] = None,
+        env: Optional[dict] = None,
         network: bool = True,
         host_cwd: str = None,
         auto_mount_cwd: bool = False,
@@ -453,16 +453,16 @@ class DockerEnvironment(BaseEnvironment):
         # Initialize session snapshot inside the container
         self.init_session()
 
-    def _build_init_env_args(self) -> list[str]:
+    def _build_init_env_args(self) -> List[str]:
         """Build -e KEY=VALUE args for injecting host env vars into init_session.
 
         These are used once during init_session() so that export -p captures
         them into the snapshot.  Subsequent execute() calls don't need -e flags.
         """
-        exec_env: dict[str, str] = dict(self._env)
+        exec_env: Dict[str, str] = dict(self._env)
 
         explicit_forward_keys = set(self._forward_env)
-        passthrough_keys: set[str] = set()
+        passthrough_keys: Set[str] = set()
         try:
             from tools.env_passthrough import get_all_passthrough
             passthrough_keys = set(get_all_passthrough())
@@ -487,7 +487,7 @@ class DockerEnvironment(BaseEnvironment):
 
     def _run_bash(self, cmd_string: str, *, login: bool = False,
                   timeout: int = 120,
-                  stdin_data: str | None = None) -> subprocess.Popen:
+                  stdin_data: Optional[str] = None) -> subprocess.Popen:
         """Spawn a bash process inside the Docker container."""
         assert self._container_id, "Container not started"
         cmd = [self._docker_exe, "exec"]

@@ -118,7 +118,7 @@ class ManagedModalEnvironment(BaseModalExecutionEnvironment):
 
         return ModalExecStart(handle=_ManagedModalExecHandle(exec_id=exec_id))
 
-    def _poll_modal_exec(self, handle: _ManagedModalExecHandle) -> dict | None:
+    def _poll_modal_exec(self, handle: _ManagedModalExecHandle) -> Optional[dict]:
         try:
             status_response = self._request(
                 "GET",

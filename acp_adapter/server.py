@@ -6,7 +6,7 @@ import asyncio
 import logging
 from collections import defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Deque, Optional
+from typing import Any, Deque, Optional, Tuple, List, Dict, Set
 
 import acp
 from acp.schema import (
@@ -73,7 +73,7 @@ _executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="acp-agent")
 
 
 def _extract_text(
-    prompt: list[
+    prompt: List[
         TextContentBlock
         | ImageContentBlock
         | AudioContentBlock
@@ -82,7 +82,7 @@ def _extract_text(
     ],
 ) -> str:
     """Extract plain text from ACP content blocks."""
-    parts: list[str] = []
+    parts: List[str] = []
     for block in prompt:
         if isinstance(block, TextContentBlock):
             parts.append(block.text)
@@ -150,7 +150,7 @@ class HermesACPAgent(acp.Agent):
         logger.info("ACP client connected")
 
     @staticmethod
-    def _encode_model_choice(provider: str | None, model: str | None) -> str:
+    def _encode_model_choice(provider: Optional[str], model: Optional[str]) -> str:
         """Encode a model selection so ACP clients can keep provider context."""
         raw_model = str(model or "").strip()
         if not raw_model:
@@ -170,8 +170,8 @@ class HermesACPAgent(acp.Agent):
 
             normalized_provider = normalize_provider(provider)
             provider_name = provider_label(normalized_provider)
-            available_models: list[ModelInfo] = []
-            seen_ids: set[str] = set()
+            available_models: List[ModelInfo] = []
+            seen_ids: Set[str] = set()
 
             for model_id, description in curated_models_for_provider(normalized_provider):
                 rendered_model = str(model_id or "").strip()
@@ -223,7 +223,7 @@ class HermesACPAgent(acp.Agent):
         )
 
     @staticmethod
-    def _resolve_model_selection(raw_model: str, current_provider: str) -> tuple[str, str]:
+    def _resolve_model_selection(raw_model: str, current_provider: str) -> Tuple[str, str]:
         """Resolve ``provider:model`` input into the provider and normalized model id."""
         target_provider = current_provider
         new_model = raw_model.strip()
@@ -244,7 +244,7 @@ class HermesACPAgent(acp.Agent):
     async def _register_session_mcp_servers(
         self,
         state: SessionState,
-        mcp_servers: list[McpServerStdio | McpServerHttp | McpServerSse] | None,
+        mcp_servers: List[McpServerStdio | McpServerHttp | McpServerSse] | None,
     ) -> None:
         """Register ACP-provided MCP servers and refresh the agent tool surface."""
         if not mcp_servers:
@@ -253,7 +253,7 @@ class HermesACPAgent(acp.Agent):
         try:
             from tools.mcp_tool import register_mcp_servers
 
-            config_map: dict[str, dict] = {}
+            config_map: Dict[str, dict] = {}
             for server in mcp_servers:
                 name = server.name
                 if isinstance(server, McpServerStdio):
@@ -310,7 +310,7 @@ class HermesACPAgent(acp.Agent):
 
     async def initialize(
         self,
-        protocol_version: int | None = None,
+        protocol_version: Optional[int] = None,
         client_capabilities: ClientCapabilities | None = None,
         client_info: Implementation | None = None,
         **kwargs: Any,
@@ -360,7 +360,7 @@ class HermesACPAgent(acp.Agent):
     async def new_session(
         self,
         cwd: str,
-        mcp_servers: list | None = None,
+        mcp_servers: Optional[list] = None,
         **kwargs: Any,
     ) -> NewSessionResponse:
         state = self.session_manager.create_session(cwd=cwd)
@@ -376,7 +376,7 @@ class HermesACPAgent(acp.Agent):
         self,
         cwd: str,
         session_id: str,
-        mcp_servers: list | None = None,
+        mcp_servers: Optional[list] = None,
         **kwargs: Any,
     ) -> LoadSessionResponse | None:
         state = self.session_manager.update_cwd(session_id, cwd)
@@ -392,7 +392,7 @@ class HermesACPAgent(acp.Agent):
         self,
         cwd: str,
         session_id: str,
-        mcp_servers: list | None = None,
+        mcp_servers: Optional[list] = None,
         **kwargs: Any,
     ) -> ResumeSessionResponse:
         state = self.session_manager.update_cwd(session_id, cwd)
@@ -419,7 +419,7 @@ class HermesACPAgent(acp.Agent):
         self,
         cwd: str,
         session_id: str,
-        mcp_servers: list | None = None,
+        mcp_servers: Optional[list] = None,
         **kwargs: Any,
     ) -> ForkSessionResponse:
         state = self.session_manager.fork_session(session_id, cwd=cwd)
@@ -433,8 +433,8 @@ class HermesACPAgent(acp.Agent):
 
     async def list_sessions(
         self,
-        cursor: str | None = None,
-        cwd: str | None = None,
+        cursor: Optional[str] = None,
+        cwd: Optional[str] = None,
         **kwargs: Any,
     ) -> ListSessionsResponse:
         infos = self.session_manager.list_sessions(cwd=cwd)
@@ -457,7 +457,7 @@ class HermesACPAgent(acp.Agent):
 
     async def prompt(
         self,
-        prompt: list[
+        prompt: List[
             TextContentBlock
             | ImageContentBlock
             | AudioContentBlock
@@ -494,8 +494,8 @@ class HermesACPAgent(acp.Agent):
         if state.cancel_event:
             state.cancel_event.clear()
 
-        tool_call_ids: dict[str, Deque[str]] = defaultdict(deque)
-        tool_call_meta: dict[str, dict[str, Any]] = {}
+        tool_call_ids: Dict[str, Deque[str]] = defaultdict(deque)
+        tool_call_meta: Dict[str, dict[str, Any]] = {}
         previous_approval_cb = None
 
         if conn:
@@ -589,8 +589,8 @@ class HermesACPAgent(acp.Agent):
     # ---- Slash commands (headless) -------------------------------------------
 
     @classmethod
-    def _available_commands(cls) -> list[AvailableCommand]:
-        commands: list[AvailableCommand] = []
+    def _available_commands(cls) -> List[AvailableCommand]:
+        commands: List[AvailableCommand] = []
         for spec in cls._ADVERTISED_COMMANDS:
             input_hint = spec.get("input_hint")
             commands.append(
@@ -633,7 +633,7 @@ class HermesACPAgent(acp.Agent):
             asyncio.create_task, self._send_available_commands_update(session_id)
         )
 
-    def _handle_slash_command(self, text: str, state: SessionState) -> str | None:
+    def _handle_slash_command(self, text: str, state: SessionState) -> Optional[str]:
         """Dispatch a slash command and return the response text.
 
         Returns ``None`` for unrecognized commands so they fall through
@@ -715,7 +715,7 @@ class HermesACPAgent(acp.Agent):
         if n_messages == 0:
             return "Conversation is empty (no messages yet)."
         # Count by role
-        roles: dict[str, int] = {}
+        roles: Dict[str, int] = {}
         for msg in state.history:
             role = msg.get("role", "unknown")
             roles[role] = roles.get(role, 0) + 1

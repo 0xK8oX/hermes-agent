@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from cli import HermesCLI
+from typing import Optional
 
 
 def _make_cli(model: str = "anthropic/claude-sonnet-4-20250514"):
@@ -17,8 +18,8 @@ def _make_cli(model: str = "anthropic/claude-sonnet-4-20250514"):
 def _attach_agent(
     cli_obj,
     *,
-    input_tokens: int | None = None,
-    output_tokens: int | None = None,
+    input_tokens: Optional[int] = None,
+    output_tokens: Optional[int] = None,
     cache_read_tokens: int = 0,
     cache_write_tokens: int = 0,
     prompt_tokens: int,

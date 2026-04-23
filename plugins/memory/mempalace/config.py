@@ -37,7 +37,7 @@ _DEFAULTS: Dict[str, Any] = {
 class MemPalaceConfig:
     """Parsed config for the MemPalace memory provider."""
 
-    def __init__(self, hermes_home: str | None = None):
+    def __init__(self, hermes_home: Optional[str] = None):
         self._cfg: Dict[str, Any] = {}
         self._hermes_home = hermes_home
         self._load()

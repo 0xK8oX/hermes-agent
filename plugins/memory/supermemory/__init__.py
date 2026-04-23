@@ -15,7 +15,7 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from agent.memory_provider import MemoryProvider
 from tools.registry import tool_error
@@ -186,7 +186,7 @@ def _format_relative_time(iso_timestamp: str) -> str:
         return ""
 
 
-def _deduplicate_recall(static_facts: list, dynamic_facts: list, search_results: list) -> tuple[list, list, list]:
+def _deduplicate_recall(static_facts: list, dynamic_facts: list, search_results: list) -> Tuple[list, list, list]:
     seen = set()
     out_static, out_dynamic, out_search = [], [], []
     for fact in static_facts or []:
@@ -274,7 +274,7 @@ class _SupermemoryClient:
                    entity_context: str = "", container_tag: Optional[str] = None,
                    custom_id: Optional[str] = None) -> dict:
         tag = container_tag or self._container_tag
-        kwargs: dict[str, Any] = {
+        kwargs: Dict[str, Any] = {
             "content": content.strip(),
             "container_tags": [tag],
         }
@@ -289,10 +289,10 @@ class _SupermemoryClient:
 
     def search_memories(self, query: str, *, limit: int = 5,
                         container_tag: Optional[str] = None,
-                        search_mode: Optional[str] = None) -> list[dict]:
+                        search_mode: Optional[str] = None) -> List[dict]:
         tag = container_tag or self._container_tag
         mode = search_mode or self._search_mode
-        kwargs: dict[str, Any] = {"q": query, "container_tag": tag, "limit": limit}
+        kwargs: Dict[str, Any] = {"q": query, "container_tag": tag, "limit": limit}
         if mode in _VALID_SEARCH_MODES:
             kwargs["search_mode"] = mode
         response = self._client.search.memories(**kwargs)
@@ -310,7 +310,7 @@ class _SupermemoryClient:
     def get_profile(self, query: Optional[str] = None, *,
                     container_tag: Optional[str] = None) -> dict:
         tag = container_tag or self._container_tag
-        kwargs: dict[str, Any] = {"container_tag": tag}
+        kwargs: Dict[str, Any] = {"container_tag": tag}
         if query:
             kwargs["q"] = query
         response = self._client.profile(**kwargs)
@@ -348,7 +348,7 @@ class _SupermemoryClient:
         preview = (target.get("memory") or "")[:100]
         return {"success": True, "message": f'Forgot: "{preview}"', "id": memory_id}
 
-    def ingest_conversation(self, session_id: str, messages: list[dict]) -> None:
+    def ingest_conversation(self, session_id: str, messages: List[dict]) -> None:
         payload = json.dumps({
             "conversationId": session_id,
             "messages": messages,
@@ -695,7 +695,7 @@ class SupermemoryMemoryProvider(MemoryProvider):
         try:
             result = self._client.add_memory(content, metadata=metadata, entity_context=self._entity_context, container_tag=tag)
             preview = content[:80] + ("..." if len(content) > 80 else "")
-            resp: dict[str, Any] = {"saved": True, "id": result.get("id", ""), "preview": preview}
+            resp: Dict[str, Any] = {"saved": True, "id": result.get("id", ""), "preview": preview}
             if tag:
                 resp["container_tag"] = tag
             return json.dumps(resp)
@@ -718,14 +718,14 @@ class SupermemoryMemoryProvider(MemoryProvider):
             results = self._client.search_memories(query, limit=limit, container_tag=tag)
             formatted = []
             for item in results:
-                entry: dict[str, Any] = {"id": item.get("id", ""), "content": item.get("memory", "")}
+                entry: Dict[str, Any] = {"id": item.get("id", ""), "content": item.get("memory", "")}
                 if item.get("similarity") is not None:
                     try:
                         entry["similarity"] = round(float(item["similarity"]) * 100)
                     except Exception:
                         pass
                 formatted.append(entry)
-            resp: dict[str, Any] = {"results": formatted, "count": len(formatted)}
+            resp: Dict[str, Any] = {"results": formatted, "count": len(formatted)}
             if tag:
                 resp["container_tag"] = tag
             return json.dumps(resp)
@@ -762,7 +762,7 @@ class SupermemoryMemoryProvider(MemoryProvider):
                 sections.append("## User Profile (Persistent)\n" + "\n".join(f"- {item}" for item in profile["static"]))
             if profile["dynamic"]:
                 sections.append("## Recent Context\n" + "\n".join(f"- {item}" for item in profile["dynamic"]))
-            resp: dict[str, Any] = {
+            resp: Dict[str, Any] = {
                 "profile": "\n\n".join(sections),
                 "static_count": len(profile["static"]),
                 "dynamic_count": len(profile["dynamic"]),

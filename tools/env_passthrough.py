@@ -21,21 +21,21 @@ from __future__ import annotations
 
 import logging
 from contextvars import ContextVar
-from typing import Iterable
+from typing import Iterable, Set
 
 logger = logging.getLogger(__name__)
 
 # Session-scoped set of env var names that should pass through to sandboxes.
 # Backed by ContextVar to prevent cross-session data bleed in the gateway pipeline.
-_allowed_env_vars_var: ContextVar[set[str]] = ContextVar("_allowed_env_vars")
+_allowed_env_vars_var: ContextVar[Set[str]] = ContextVar("_allowed_env_vars")
 
 
-def _get_allowed() -> set[str]:
+def _get_allowed() -> Set[str]:
     """Get or create the allowed env vars set for the current context/session."""
     try:
         return _allowed_env_vars_var.get()
     except LookupError:
-        val: set[str] = set()
+        val: Set[str] = set()
         _allowed_env_vars_var.set(val)
         return val
 
@@ -62,7 +62,7 @@ def _load_config_passthrough() -> frozenset[str]:
     if _config_passthrough is not None:
         return _config_passthrough
 
-    result: set[str] = set()
+    result: Set[str] = set()
     try:
         from hermes_cli.config import read_raw_config
         cfg = read_raw_config()

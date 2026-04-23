@@ -670,12 +670,12 @@ def get_toolset_info(name: str) -> Dict[str, Any]:
     
     return {
         "name": name,
-        "description": toolset["description"],
-        "direct_tools": toolset["tools"],
-        "includes": toolset["includes"],
+        "description": toolSet["description"],
+        "direct_tools": toolSet["tools"],
+        "includes": toolSet["includes"],
         "resolved_tools": resolved_tools,
         "tool_count": len(resolved_tools),
-        "is_composite": bool(toolset["includes"])
+        "is_composite": bool(toolSet["includes"])
     }
 
 
@@ -690,7 +690,7 @@ if __name__ == "__main__":
     for name, toolset in get_all_toolsets().items():
         info = get_toolset_info(name)
         composite = "[composite]" if info["is_composite"] else "[leaf]"
-        print(f"  {composite} {name:20} - {toolset['description']}")
+        print(f"  {composite} {name:20} - {toolSet['description']}")
         print(f"     Tools: {len(info['resolved_tools'])} total")
     
     print("\nToolset Resolution Examples:")

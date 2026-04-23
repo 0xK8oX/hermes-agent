@@ -7,6 +7,7 @@ import logging
 import os
 import threading
 from pathlib import Path
+from typing import Optional
 from tools.binary_extensions import has_binary_extension
 from tools.file_operations import ShellFileOperations
 from agent.redact import redact_sensitive_text
@@ -26,7 +27,7 @@ _EXPECTED_WRITE_ERRNOS = {errno.EACCES, errno.EPERM, errno.EROFS}
 # Configurable via config.yaml:  file_read_max_chars: 200000
 # ---------------------------------------------------------------------------
 _DEFAULT_MAX_READ_CHARS = 100_000
-_max_read_chars_cached: int | None = None
+_max_read_chars_cached: Optional[int] = None
 
 
 def _get_max_read_chars() -> int:
@@ -110,7 +111,7 @@ _SENSITIVE_PATH_PREFIXES = (
 _SENSITIVE_EXACT_PATHS = {"/var/run/docker.sock", "/run/docker.sock"}
 
 
-def _check_bound_channel_permission(filepath: str, task_id: str) -> str | None:
+def _check_bound_channel_permission(filepath: str, task_id: str) -> Optional[str]:
     """Check if a bound channel session has permission to write to Hermes config paths.
 
     Bound channel souls (e.g. a soul bound to a Discord channel) are restricted
@@ -176,7 +177,7 @@ def _check_bound_channel_permission(filepath: str, task_id: str) -> str | None:
     )
 
 
-def _check_sensitive_path(filepath: str) -> str | None:
+def _check_sensitive_path(filepath: str) -> Optional[str]:
     """Return an error message if the path targets a sensitive system location."""
     try:
         resolved = str(_resolve_path(filepath))
@@ -643,7 +644,7 @@ def _update_read_timestamp(filepath: str, task_id: str) -> None:
             _cap_read_tracker_data(task_data)
 
 
-def _check_file_staleness(filepath: str, task_id: str) -> str | None:
+def _check_file_staleness(filepath: str, task_id: str) -> Optional[str]:
     """Check whether a file was modified since the agent last read it.
 
     Returns a warning string if the file is stale (mtime changed since
@@ -835,6 +836,7 @@ def search_tool(pattern: str, target: str = "content", path: str = ".",
 # Schemas + Registry
 # ---------------------------------------------------------------------------
 from tools.registry import registry, tool_error
+from typing import Optional, Dict
 
 
 def _check_file_reqs():

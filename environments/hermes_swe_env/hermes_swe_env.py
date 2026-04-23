@@ -33,7 +33,7 @@ import logging
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union, Set
 
 # Ensure repo root is on sys.path for imports
 _repo_root = Path(__file__).resolve().parent.parent.parent
@@ -137,7 +137,7 @@ class HermesSweEnv(HermesAgentBaseEnv):
         """Cycle through the SWE dataset."""
         if not self.dataset:
             raise ValueError("No dataset loaded. Set dataset_name in config.")
-        item = self.dataset[self.iter % len(self.dataset)]
+        item = self.dataSet[self.iter % len(self.dataset)]
         self.iter += 1
         return item
 

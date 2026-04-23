@@ -6,13 +6,14 @@ These tests do NOT require AWS credentials or boto3 — all AWS calls
 are mocked.
 
 Note: Tests that import ``hermes_cli.auth`` or ``hermes_cli.runtime_provider``
-require Python 3.10+ due to ``str | None`` type syntax in the import chain.
+require Python 3.10+ due to ``Optional[str]`` type syntax in the import chain.
 """
 
 import os
 from unittest.mock import MagicMock, patch
 
 import pytest
+from typing import Optional
 
 
 class TestProviderRegistry:

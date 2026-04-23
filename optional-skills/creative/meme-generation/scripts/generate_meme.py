@@ -28,6 +28,7 @@ except ImportError:
     _requests = None
 
 from PIL import Image, ImageDraw, ImageFont
+from typing import List
 
 SCRIPT_DIR = Path(__file__).parent
 TEMPLATES_FILE = SCRIPT_DIR / "templates.json"
@@ -342,7 +343,7 @@ def _add_bars(img: Image.Image, texts: list) -> Image.Image:
     return canvas
 
 
-def generate_meme(template_id: str, texts: list[str], output_path: str) -> str:
+def generate_meme(template_id: str, texts: List[str], output_path: str) -> str:
     """Generate a meme from a template and save it. Returns the path."""
     tmpl = resolve_template(template_id)
 
@@ -365,7 +366,7 @@ def generate_meme(template_id: str, texts: list[str], output_path: str) -> str:
 
 
 def generate_from_image(
-    image_path: str, texts: list[str], output_path: str, use_bars: bool = False
+    image_path: str, texts: List[str], output_path: str, use_bars: bool = False
 ) -> str:
     """Generate a meme from a custom image (e.g. AI-generated). Returns the path."""
     img = Image.open(image_path).convert("RGBA")

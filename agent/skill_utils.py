@@ -118,7 +118,7 @@ def skill_matches_platform(frontmatter: Dict[str, Any]) -> bool:
 # ── Disabled skills ───────────────────────────────────────────────────────
 
 
-def get_disabled_skill_names(platform: str | None = None) -> Set[str]:
+def get_disabled_skill_names(platform: Optional[str] = None) -> Set[str]:
     """Read disabled skill names from config.yaml.
 
     Args:

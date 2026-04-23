@@ -12,6 +12,7 @@ from pathlib import Path
 
 from hermes_constants import get_hermes_home
 from plugins.memory.honcho.client import resolve_active_host, resolve_config_path, HOST
+from typing import Optional, Tuple, List
 
 
 def clone_honcho_for_profile(profile_name: str) -> bool:
@@ -70,7 +71,7 @@ def clone_honcho_for_profile(profile_name: str) -> bool:
     return True
 
 
-def _ensure_peer_exists(host_key: str | None = None) -> bool:
+def _ensure_peer_exists(host_key: Optional[str] = None) -> bool:
     """Create the AI peer in Honcho if it doesn't already exist.
 
     Idempotent -- safe to call multiple times. Returns True if the peer
@@ -226,7 +227,7 @@ def sync_honcho_profiles_quiet() -> int:
     return created
 
 
-_profile_override: str | None = None
+_profile_override: Optional[str] = None
 
 
 def _host_key() -> str:
@@ -278,7 +279,7 @@ def _resolve_api_key(cfg: dict) -> str:
     return host_key or cfg.get("apiKey", "") or os.environ.get("HONCHO_API_KEY", "")
 
 
-def _prompt(label: str, default: str | None = None, secret: bool = False) -> str:
+def _prompt(label: str, default: Optional[str] = None, secret: bool = False) -> str:
     suffix = f" [{default}]" if default else ""
     sys.stdout.write(f"  {label}{suffix}: ")
     sys.stdout.flush()
@@ -566,7 +567,7 @@ def _active_profile_name() -> str:
         return "default"
 
 
-def _all_profile_host_configs() -> list[tuple[str, str, dict]]:
+def _all_profile_host_configs() -> List[Tuple[str, str, dict]]:
     """Return (profile_name, host_key, host_block) for every known profile.
 
     Reads honcho.json once and maps each profile to its host block.
@@ -1059,8 +1060,8 @@ def cmd_migrate(args) -> None:
     # AI peer: agent identity / configuration
     agent_file_names = ["SOUL.md", "IDENTITY.md", "AGENTS.md", "TOOLS.md", "BOOTSTRAP.md"]
 
-    user_files: list[Path] = []
-    agent_files: list[Path] = []
+    user_files: List[Path] = []
+    agent_files: List[Path] = []
     for name in user_file_names:
         for d in [cwd, openclaw_home]:
             p = d / name

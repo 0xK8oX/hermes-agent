@@ -27,6 +27,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import Optional, Tuple, List
 
 try:
     from hermes_constants import display_hermes_home, get_hermes_home
@@ -74,7 +75,7 @@ def _load_token_payload(path: Path = TOKEN_PATH) -> dict:
         return {}
 
 
-def _missing_scopes_from_payload(payload: dict) -> list[str]:
+def _missing_scopes_from_payload(payload: dict) -> List[str]:
     raw = payload.get("scopes") or payload.get("scope")
     if not raw:
         return []
@@ -82,7 +83,7 @@ def _missing_scopes_from_payload(payload: dict) -> list[str]:
     return sorted(scope for scope in SCOPES if scope not in granted)
 
 
-def _format_missing_scopes(missing_scopes: list[str]) -> str:
+def _format_missing_scopes(missing_scopes: List[str]) -> str:
     bullets = "\n".join(f"  - {scope}" for scope in missing_scopes)
     return (
         "Token is valid but missing required Google Workspace scopes:\n"
@@ -236,7 +237,7 @@ def _load_pending_auth() -> dict:
     return data
 
 
-def _extract_code_and_state(code_or_url: str) -> tuple[str, str | None]:
+def _extract_code_and_state(code_or_url: str) -> Tuple[str, Optional[str]]:
     """Accept either a raw auth code or the full redirect URL pasted by the user."""
     if not code_or_url.startswith("http"):
         return code_or_url, None

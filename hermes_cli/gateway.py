@@ -12,6 +12,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import List, Optional, Set, Tuple
 
 PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 
@@ -48,8 +49,8 @@ class GatewayRuntimeSnapshot:
     manager: str
     service_installed: bool = False
     service_running: bool = False
-    gateway_pids: tuple[int, ...] = ()
-    service_scope: str | None = None
+    gateway_pids: Tuple[int, ...] = ()
+    service_scope: Optional[str] = None
 
     @property
     def running(self) -> bool:
@@ -122,7 +123,7 @@ def _get_service_pids() -> set:
     return pids
 
 
-def _get_parent_pid(pid: int) -> int | None:
+def _get_parent_pid(pid: int) -> Optional[int]:
     """Return the parent PID for ``pid``, or ``None`` when unavailable."""
     if pid <= 1:
         return None
@@ -153,7 +154,7 @@ def _is_pid_ancestor_of_current_process(target_pid: int) -> bool:
         return False
 
     pid = os.getpid()
-    seen: set[int] = set()
+    seen: Set[int] = set()
     while pid and pid not in seen:
         if pid == target_pid:
             return True
@@ -175,7 +176,7 @@ def _request_gateway_self_restart(pid: int) -> bool:
     return True
 
 
-def _append_unique_pid(pids: list[int], pid: int | None, exclude_pids: set[int]) -> None:
+def _append_unique_pid(pids: List[int], pid: Optional[int], exclude_pids: Set[int]) -> None:
     if pid is None or pid <= 0:
         return
     if pid == os.getpid() or pid in exclude_pids or pid in pids:
@@ -183,14 +184,14 @@ def _append_unique_pid(pids: list[int], pid: int | None, exclude_pids: set[int])
     pids.append(pid)
 
 
-def _scan_gateway_pids(exclude_pids: set[int], all_profiles: bool = False) -> list[int]:
+def _scan_gateway_pids(exclude_pids: Set[int], all_profiles: bool = False) -> List[int]:
     """Best-effort process-table scan for gateway PIDs.
 
     This supplements the profile-scoped PID file so status views can still spot
     a live gateway when the PID file is stale/missing, and ``--all`` sweeps can
     discover gateways outside the current profile.
     """
-    pids: list[int] = []
+    pids: List[int] = []
     patterns = [
         "hermes_cli.main gateway",
         "hermes_cli.main --profile",
@@ -287,7 +288,7 @@ def _scan_gateway_pids(exclude_pids: set[int], all_profiles: bool = False) -> li
     return pids
 
 
-def find_gateway_pids(exclude_pids: set | None = None, all_profiles: bool = False) -> list:
+def find_gateway_pids(exclude_pids: Optional[set] = None, all_profiles: bool = False) -> list:
     """Find PIDs of running gateway processes.
 
     Args:
@@ -300,7 +301,7 @@ def find_gateway_pids(exclude_pids: set | None = None, all_profiles: bool = Fals
             Hermes profile are returned.
     """
     _exclude = set(exclude_pids or set())
-    pids: list[int] = []
+    pids: List[int] = []
     if not all_profiles:
         try:
             from gateway.status import get_running_pid
@@ -315,7 +316,7 @@ def find_gateway_pids(exclude_pids: set | None = None, all_profiles: bool = Fals
     return pids
 
 
-def _probe_systemd_service_running(system: bool = False) -> tuple[bool, bool]:
+def _probe_systemd_service_running(system: bool = False) -> Tuple[bool, bool]:
     selected_system = _select_systemd_scope(system)
     unit_exists = get_systemd_unit_path(system=selected_system).exists()
     if not unit_exists:
@@ -391,7 +392,7 @@ def get_gateway_runtime_snapshot(system: bool = False) -> GatewayRuntimeSnapshot
     )
 
 
-def _format_gateway_pids(pids: tuple[int, ...] | list[int], *, limit: int | None = 3) -> str:
+def _format_gateway_pids(pids: Tuple[int, ...] | List[int], *, limit: Optional[int] = 3) -> str:
     rendered = [str(pid) for pid in pids[:limit] if pid > 0] if limit is not None else [str(pid) for pid in pids if pid > 0]
     if limit is not None and len(pids) > limit:
         rendered.append("...")
@@ -408,7 +409,7 @@ def _print_gateway_process_mismatch(snapshot: GatewayRuntimeSnapshot) -> None:
     print("  can refuse to start another copy until this process stops.")
 
 
-def kill_gateway_processes(force: bool = False, exclude_pids: set | None = None,
+def kill_gateway_processes(force: bool = False, exclude_pids: Optional[set] = None,
                            all_profiles: bool = False) -> int:
     """Kill any running gateway processes. Returns count killed.
 
@@ -479,6 +480,7 @@ def is_linux() -> bool:
 
 
 from hermes_constants import is_container, is_termux, is_wsl
+from typing import Optional, Tuple, List, Set
 
 
 def _wsl_systemd_operational() -> bool:
@@ -570,7 +572,7 @@ def _profile_suffix() -> str:
     return hashlib.sha256(str(home).encode()).hexdigest()[:8]
 
 
-def _profile_arg(hermes_home: str | None = None) -> str:
+def _profile_arg(hermes_home: Optional[str] = None) -> str:
     """Return ``--profile <name>`` only when HERMES_HOME is a named profile.
 
     For ``~/.hermes/profiles/<name>``, returns ``"--profile <name>"``.
@@ -641,17 +643,17 @@ def _ensure_user_systemd_env() -> None:
             os.environ["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path={bus_path}"
 
 
-def _systemctl_cmd(system: bool = False) -> list[str]:
+def _systemctl_cmd(system: bool = False) -> List[str]:
     if not system:
         _ensure_user_systemd_env()
     return ["systemctl"] if system else ["systemctl", "--user"]
 
 
-def _journalctl_cmd(system: bool = False) -> list[str]:
+def _journalctl_cmd(system: bool = False) -> List[str]:
     return ["journalctl"] if system else ["journalctl", "--user"]
 
 
-def _run_systemctl(args: list[str], *, system: bool = False, **kwargs) -> subprocess.CompletedProcess:
+def _run_systemctl(args: List[str], *, system: bool = False, **kwargs) -> subprocess.CompletedProcess:
     """Run a systemctl command, raising RuntimeError if systemctl is missing.
 
     Defense-in-depth: callers are gated by ``supports_systemd_services()``,
@@ -670,9 +672,9 @@ def _service_scope_label(system: bool = False) -> str:
     return "system" if system else "user"
 
 
-def get_installed_systemd_scopes() -> list[str]:
+def get_installed_systemd_scopes() -> List[str]:
     scopes = []
-    seen_paths: set[Path] = set()
+    seen_paths: Set[Path] = set()
     for system, label in ((False, "user"), (True, "system")):
         unit_path = get_systemd_unit_path(system=system)
         if unit_path in seen_paths:
@@ -691,11 +693,11 @@ def has_conflicting_systemd_units() -> bool:
 # hermes-gateway rename. Kept as an explicit allowlist (NOT a glob) so
 # profile units (hermes-gateway-*.service) and unrelated third-party
 # "hermes" units are never matched.
-_LEGACY_SERVICE_NAMES: tuple[str, ...] = ("hermes.service",)
+_LEGACY_SERVICE_NAMES: Tuple[str, ...] = ("hermes.service",)
 
 # ExecStart content markers that identify a unit as running our gateway.
 # A legacy unit is only flagged when its file contains one of these.
-_LEGACY_UNIT_EXECSTART_MARKERS: tuple[str, ...] = (
+_LEGACY_UNIT_EXECSTART_MARKERS: Tuple[str, ...] = (
     "hermes_cli.main gateway",
     "hermes_cli/main.py gateway",
     "gateway/run.py",
@@ -704,7 +706,7 @@ _LEGACY_UNIT_EXECSTART_MARKERS: tuple[str, ...] = (
 )
 
 
-def _legacy_unit_search_paths() -> list[tuple[bool, Path]]:
+def _legacy_unit_search_paths() -> List[Tuple[bool, Path]]:
     """Return ``[(is_system, base_dir), ...]`` — directories to scan for legacy units.
 
     Factored out so tests can monkeypatch the search roots without touching
@@ -716,7 +718,7 @@ def _legacy_unit_search_paths() -> list[tuple[bool, Path]]:
     ]
 
 
-def _find_legacy_hermes_units() -> list[tuple[str, Path, bool]]:
+def _find_legacy_hermes_units() -> List[Tuple[str, Path, bool]]:
     """Return ``[(unit_name, unit_path, is_system)]`` for legacy Hermes gateway units.
 
     Detects unit files installed by older Hermes versions that used a
@@ -737,7 +739,7 @@ def _find_legacy_hermes_units() -> list[tuple[str, Path, bool]]:
     * Results are returned purely for caller inspection; this function
       never mutates or removes anything.
     """
-    results: list[tuple[str, Path, bool]] = []
+    results: List[Tuple[str, Path, bool]] = []
     for is_system, base in _legacy_unit_search_paths():
         for name in _LEGACY_SERVICE_NAMES:
             unit_path = base / name
@@ -781,7 +783,7 @@ def print_legacy_unit_warning() -> None:
 def remove_legacy_hermes_units(
     interactive: bool = True,
     dry_run: bool = False,
-) -> tuple[int, list[Path]]:
+) -> Tuple[int, List[Path]]:
     """Stop, disable, and remove legacy Hermes gateway unit files.
 
     Iterates over whatever ``_find_legacy_hermes_units()`` returns — which is
@@ -822,7 +824,7 @@ def remove_legacy_hermes_units(
         return 0, [p for _, p, _ in legacy]
 
     removed = 0
-    remaining: list[Path] = []
+    remaining: List[Path] = []
 
     # User-scope removal
     for name, path in user_units:
@@ -896,7 +898,7 @@ def _require_root_for_system_service(action: str) -> None:
         sys.exit(1)
 
 
-def _system_service_identity(run_as_user: str | None = None) -> tuple[str, str, str]:
+def _system_service_identity(run_as_user: Optional[str] = None) -> Tuple[str, str, str]:
     import getpass
     import grp
     import pwd
@@ -919,7 +921,7 @@ def _system_service_identity(run_as_user: str | None = None) -> tuple[str, str, 
     return username, group_name, user_info.pw_dir
 
 
-def _read_systemd_user_from_unit(unit_path: Path) -> str | None:
+def _read_systemd_user_from_unit(unit_path: Path) -> Optional[str]:
     if not unit_path.exists():
         return None
 
@@ -930,14 +932,14 @@ def _read_systemd_user_from_unit(unit_path: Path) -> str | None:
     return None
 
 
-def _default_system_service_user() -> str | None:
+def _default_system_service_user() -> Optional[str]:
     for candidate in (os.getenv("SUDO_USER"), os.getenv("USER"), os.getenv("LOGNAME")):
         if candidate and candidate.strip() and candidate.strip() != "root":
             return candidate.strip()
     return None
 
 
-def prompt_linux_gateway_install_scope() -> str | None:
+def prompt_linux_gateway_install_scope() -> Optional[str]:
     choice = prompt_choice(
         "  Choose how the gateway should run in the background:",
         [
@@ -950,7 +952,7 @@ def prompt_linux_gateway_install_scope() -> str | None:
     return {0: "user", 1: "system", 2: None}[choice]
 
 
-def install_linux_gateway_from_setup(force: bool = False) -> tuple[str | None, bool]:
+def install_linux_gateway_from_setup(force: bool = False) -> Tuple[Optional[str], bool]:
     scope = prompt_linux_gateway_install_scope()
     if scope is None:
         return None, False
@@ -981,7 +983,7 @@ def install_linux_gateway_from_setup(force: bool = False) -> tuple[str | None, b
     return scope, True
 
 
-def get_systemd_linger_status() -> tuple[bool | None, str]:
+def get_systemd_linger_status() -> Tuple[Optional[bool], str]:
     """Return systemd linger status for the current user.
 
     Returns:
@@ -1115,7 +1117,7 @@ def get_python_path() -> str:
 # Systemd (Linux)
 # =============================================================================
 
-def _build_user_local_paths(home: Path, path_entries: list[str]) -> list[str]:
+def _build_user_local_paths(home: Path, path_entries: List[str]) -> List[str]:
     """Return user-local bin dirs that exist and aren't already in *path_entries*."""
     candidates = [
         str(home / ".local" / "bin"),       # uv, uvx, pip-installed CLIs
@@ -1178,7 +1180,7 @@ def _hermes_home_for_target_user(target_home_dir: str) -> str:
         return str(current_hermes)
 
 
-def generate_systemd_unit(system: bool = False, run_as_user: str | None = None) -> str:
+def generate_systemd_unit(system: bool = False, run_as_user: Optional[str] = None) -> str:
     python_path = get_python_path()
     working_dir = str(PROJECT_ROOT)
     detected_venv = _detect_venv_dir()
@@ -1326,7 +1328,7 @@ def refresh_systemd_unit_if_needed(system: bool = False) -> bool:
 
 
 
-def _print_linger_enable_warning(username: str, detail: str | None = None) -> None:
+def _print_linger_enable_warning(username: str, detail: Optional[str] = None) -> None:
     print()
     print("⚠ Linger not enabled — gateway may stop when you close this terminal.")
     if detail:
@@ -1405,7 +1407,7 @@ def _get_restart_drain_timeout() -> float:
     return parse_restart_drain_timeout(raw)
 
 
-def systemd_install(force: bool = False, system: bool = False, run_as_user: str | None = None):
+def systemd_install(force: bool = False, system: bool = False, run_as_user: Optional[str] = None):
     if system:
         _require_root_for_system_service("install")
 
@@ -1859,7 +1861,7 @@ def launchd_stop():
     _wait_for_gateway_exit(timeout=10.0, force_after=5.0)
     print("✓ Service stopped")
 
-def _wait_for_gateway_exit(timeout: float = 10.0, force_after: float | None = 5.0) -> bool:
+def _wait_for_gateway_exit(timeout: float = 10.0, force_after: Optional[float] = 5.0) -> bool:
     """Wait for the gateway process (by saved PID) to exit.
 
     Uses the PID from the gateway.pid file — not launchd labels — so this
@@ -2431,7 +2433,7 @@ def _platform_status(platform: dict) -> str:
     return "not configured"
 
 
-def _runtime_health_lines() -> list[str]:
+def _runtime_health_lines() -> List[str]:
     """Summarize the latest persisted gateway runtime health state."""
     try:
         from gateway.status import read_runtime_status
@@ -2442,7 +2444,7 @@ def _runtime_health_lines() -> list[str]:
     if not state:
         return []
 
-    lines: list[str] = []
+    lines: List[str] = []
     gateway_state = state.get("gateway_state")
     exit_reason = state.get("exit_reason")
     active_agents = state.get("active_agents")

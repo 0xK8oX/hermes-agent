@@ -20,7 +20,7 @@ import json
 import time
 from collections import Counter, defaultdict
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 from agent.usage_pricing import (
     CanonicalUsage,
@@ -47,7 +47,7 @@ def _estimate_cost(
     cache_write_tokens: int = 0,
     provider: str = None,
     base_url: str = None,
-) -> tuple[float, str]:
+) -> Tuple[float, str]:
     """Estimate the USD cost for a session row or a model/token tuple."""
     if isinstance(session_or_model, dict):
         session = session_or_model

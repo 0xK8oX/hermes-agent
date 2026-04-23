@@ -804,7 +804,7 @@ def _configure_toolset(ts_key: str, config: dict):
         _configure_simple_requirements(ts_key)
 
 
-def _visible_providers(cat: dict, config: dict) -> list[dict]:
+def _visible_providers(cat: dict, config: dict) -> List[dict]:
     """Return provider entries visible for the current auth/config state."""
     features = get_nous_subscription_features(config)
     visible = []
