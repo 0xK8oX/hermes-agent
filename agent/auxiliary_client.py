@@ -48,6 +48,7 @@ from openai import OpenAI
 from agent.credential_pool import load_pool
 from hermes_cli.config import get_hermes_home
 from hermes_constants import OPENROUTER_BASE_URL
+from utils import base_url_host_matches, base_url_hostname, normalize_proxy_env_vars
 
 logger = logging.getLogger(__name__)
 
@@ -133,6 +134,7 @@ _API_KEY_PROVIDER_AUX_MODELS: Dict[str, str] = {
     "gemini": "gemini-3-flash-preview",
     "zai": "glm-4.5-flash",
     "kimi-coding": "kimi-k2-turbo-preview",
+    "stepfun": "step-3.5-flash",
     "kimi-coding-cn": "kimi-k2-turbo-preview",
     "minimax": "MiniMax-M2.7",
     "minimax-cn": "MiniMax-M2.7",
@@ -160,6 +162,16 @@ _OR_HEADERS = {
     "X-OpenRouter-Categories": "productivity,cli-agent",
 }
 
+# Vercel AI Gateway app attribution headers. HTTP-Referer maps to
+# referrerUrl and X-Title maps to appName in the gateway's analytics.
+from hermes_cli import __version__ as _HERMES_VERSION
+
+_AI_GATEWAY_HEADERS = {
+    "HTTP-Referer": "https://hermes-agent.nousresearch.com",
+    "X-Title": "Hermes Agent",
+    "User-Agent": f"HermesAgent/{_HERMES_VERSION}",
+}
+
 # Nous Portal extra_body for product attribution.
 # Callers should pass this as extra_body in chat.completions.create()
 # when the auxiliary client is backed by Nous Portal.
@@ -171,8 +183,6 @@ auxiliary_is_nous: bool = False
 # Default auxiliary models per provider
 _OPENROUTER_MODEL = "google/gemini-3-flash-preview"
 _NOUS_MODEL = "google/gemini-3-flash-preview"
-_NOUS_FREE_TIER_VISION_MODEL = "xiaomi/mimo-v2-omni"
-_NOUS_FREE_TIER_AUX_MODEL = "xiaomi/mimo-v2-pro"
 _NOUS_DEFAULT_BASE_URL = "https://inference-api.nousresearch.com/v1"
 _ANTHROPIC_DEFAULT_BASE_URL = "https://api.anthropic.com"
 _AUTH_JSON_PATH = get_hermes_home() / "auth.json"
@@ -563,7 +573,8 @@ class _AnthropicCompletionsAdapter:
         self._is_oauth = is_oauth
 
     def create(self, **kwargs) -> Any:
-        from agent.anthropic_adapter import build_anthropic_kwargs, normalize_anthropic_response
+        from agent.anthropic_adapter import build_anthropic_kwargs
+        from agent.transports import get_transport
 
         messages = kwargs.get("messages", [])
         model = kwargs.get("model", self._model)
@@ -600,7 +611,19 @@ class _AnthropicCompletionsAdapter:
                 anthropic_kwargs["temperature"] = temperature
 
         response = self._client.messages.create(**anthropic_kwargs)
-        assistant_message, finish_reason = normalize_anthropic_response(response)
+        _transport = get_transport("anthropic_messages")
+        _nr = _transport.normalize_response(
+            response, strip_tool_prefix=self._is_oauth
+        )
+
+        # ToolCall already duck-types as OpenAI shape (.type, .function.name,
+        # .function.arguments) via properties, so no wrapping needed.
+        assistant_message = SimpleNamespace(
+            content=_nr.content,
+            tool_calls=_nr.tool_calls,
+            reasoning=_nr.reasoning,
+        )
+        finish_reason = _nr.finish_reason
 
         usage = None
         if hasattr(response, "usage") and response.usage:
@@ -717,6 +740,33 @@ def _nous_base_url() -> str:
     return os.getenv("NOUS_INFERENCE_BASE_URL", _NOUS_DEFAULT_BASE_URL)
 
 
+def _resolve_nous_runtime_api(*, force_refresh: bool = False) -> Optional[tuple[str, str]]:
+    """Return fresh Nous runtime credentials when available.
+
+    This mirrors the main agent's 401 recovery path and keeps auxiliary
+    clients aligned with the singleton auth store + mint flow instead of
+    relying only on whatever raw tokens happen to be sitting in auth.json
+    or the credential pool.
+    """
+    try:
+        from hermes_cli.auth import resolve_nous_runtime_credentials
+
+        creds = resolve_nous_runtime_credentials(
+            min_key_ttl_seconds=max(60, int(os.getenv("HERMES_NOUS_MIN_KEY_TTL_SECONDS", "1800"))),
+            timeout_seconds=float(os.getenv("HERMES_NOUS_TIMEOUT_SECONDS", "15")),
+            force_mint=force_refresh,
+        )
+    except Exception as exc:
+        logger.debug("Auxiliary Nous runtime credential resolution failed: %s", exc)
+        return None
+
+    api_key = str(creds.get("api_key") or "").strip()
+    base_url = str(creds.get("base_url") or "").strip().rstrip("/")
+    if not api_key or not base_url:
+        return None
+    return api_key, base_url
+
+
 def _read_codex_access_token() -> Optional[str]:
     """Read a valid, non-expired Codex OAuth access token from Hermes auth store.
 
@@ -806,9 +856,9 @@ def _resolve_api_key_provider() -> Tuple[Optional[OpenAI], Optional[str]]:
                 if is_native_gemini_base_url(base_url):
                     return GeminiNativeClient(api_key=api_key, base_url=base_url), model
             extra = {}
-            if "api.kimi.com" in base_url.lower():
-                extra["default_headers"] = {"User-Agent": "KimiCLI/1.30.0"}
-            elif "api.githubcopilot.com" in base_url.lower():
+            if base_url_host_matches(base_url, "api.kimi.com"):
+                extra["default_headers"] = {"User-Agent": "claude-code/0.1.0"}
+            elif base_url_host_matches(base_url, "api.githubcopilot.com"):
                 from hermes_cli.models import copilot_default_headers
 
                 extra["default_headers"] = copilot_default_headers()
@@ -832,9 +882,9 @@ def _resolve_api_key_provider() -> Tuple[Optional[OpenAI], Optional[str]]:
             if is_native_gemini_base_url(base_url):
                 return GeminiNativeClient(api_key=api_key, base_url=base_url), model
         extra = {}
-        if "api.kimi.com" in base_url.lower():
-            extra["default_headers"] = {"User-Agent": "KimiCLI/1.30.0"}
-        elif "api.githubcopilot.com" in base_url.lower():
+        if base_url_host_matches(base_url, "api.kimi.com"):
+            extra["default_headers"] = {"User-Agent": "claude-code/0.1.0"}
+        elif base_url_host_matches(base_url, "api.githubcopilot.com"):
             from hermes_cli.models import copilot_default_headers
 
             extra["default_headers"] = copilot_default_headers()
@@ -883,29 +933,50 @@ def _try_nous(vision: bool = False) -> Tuple[Optional[OpenAI], Optional[str]]:
         pass
 
     nous = _read_nous_auth()
-    if not nous:
+    runtime = _resolve_nous_runtime_api(force_refresh=False)
+    if runtime is None and not nous:
         return None, None
     global auxiliary_is_nous
     auxiliary_is_nous = True
     logger.debug("Auxiliary client: Nous Portal")
-    if nous.get("source") == "pool":
-        model = "gemini-3-flash"
-    else:
-        model = _NOUS_MODEL
-    # Free-tier users can't use paid auxiliary models — use the free
-    # models instead: mimo-v2-omni for vision, mimo-v2-pro for text tasks.
+
+    # Ask the Portal which model it currently recommends for this task type.
+    # The /api/nous/recommended-models endpoint is the authoritative source:
+    # it distinguishes paid vs free tier recommendations, and get_nous_recommended_aux_model
+    # auto-detects the caller's tier via check_nous_free_tier().  Fall back to
+    # _NOUS_MODEL (google/gemini-3-flash-preview) when the Portal is unreachable
+    # or returns a null recommendation for this task type.
+    model = _NOUS_MODEL
     try:
-        from hermes_cli.models import check_nous_free_tier
-        if check_nous_free_tier():
-            model = _NOUS_FREE_TIER_VISION_MODEL if vision else _NOUS_FREE_TIER_AUX_MODEL
-            logger.debug("Free-tier Nous account — using %s for auxiliary/%s",
-                         model, "vision" if vision else "text")
-    except Exception:
-        pass
+        from hermes_cli.models import get_nous_recommended_aux_model
+        recommended = get_nous_recommended_aux_model(vision=vision)
+        if recommended:
+            model = recommended
+            logger.debug(
+                "Auxiliary/%s: using Portal-recommended model %s",
+                "vision" if vision else "text", model,
+            )
+        else:
+            logger.debug(
+                "Auxiliary/%s: no Portal recommendation, falling back to %s",
+                "vision" if vision else "text", model,
+            )
+    except Exception as exc:
+        logger.debug(
+            "Auxiliary/%s: recommended-models lookup failed (%s); "
+            "falling back to %s",
+            "vision" if vision else "text", exc, model,
+        )
+
+    if runtime is not None:
+        api_key, base_url = runtime
+    else:
+        api_key = _nous_api_key(nous or {})
+        base_url = str((nous or {}).get("inference_base_url") or _nous_base_url()).rstrip("/")
     return (
         OpenAI(
-            api_key=_nous_api_key(nous),
-            base_url=str(nous.get("inference_base_url") or _nous_base_url()).rstrip("/"),
+            api_key=api_key,
+            base_url=base_url,
         ),
         model,
     )
@@ -983,7 +1054,7 @@ def _resolve_custom_runtime() -> Tuple[Optional[str], Optional[str], Optional[st
         return None, None, None
 
     custom_base = custom_base.strip().rstrip("/")
-    if "openrouter.ai" in custom_base.lower():
+    if base_url_host_matches(custom_base, "openrouter.ai"):
         # requested='custom' falls back to OpenRouter when no custom endpoint is
         # configured. Treat that as "no custom endpoint" for auxiliary routing.
         return None, None, None
@@ -1016,6 +1087,8 @@ def _validate_proxy_env_urls() -> None:
     error that doesn't name the offending env var.
     """
     from urllib.parse import urlparse
+
+    normalize_proxy_env_vars()
 
     for key in ("HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY",
                 "https_proxy", "http_proxy", "all_proxy"):
@@ -1606,15 +1679,15 @@ def _to_async_client(sync_client, model: str):
         "api_key": sync_client.api_key,
         "base_url": str(sync_client.base_url),
     }
-    base_lower = str(sync_client.base_url).lower()
-    if "openrouter" in base_lower:
+    sync_base_url = str(sync_client.base_url)
+    if base_url_host_matches(sync_base_url, "openrouter.ai"):
         async_kwargs["default_headers"] = dict(_OR_HEADERS)
-    elif "api.githubcopilot.com" in base_lower:
+    elif base_url_host_matches(sync_base_url, "api.githubcopilot.com"):
         from hermes_cli.models import copilot_default_headers
 
         async_kwargs["default_headers"] = copilot_default_headers()
-    elif "api.kimi.com" in base_lower:
-        async_kwargs["default_headers"] = {"User-Agent": "KimiCLI/1.30.0"}
+    elif base_url_host_matches(sync_base_url, "api.kimi.com"):
+        async_kwargs["default_headers"] = {"User-Agent": "claude-code/0.1.0"}
     return AsyncOpenAI(**async_kwargs), model
 
 
@@ -1690,8 +1763,7 @@ def resolve_provider_client(
         # Auto-detect: api.openai.com + codex model name pattern
         if api_mode and api_mode != "codex_responses":
             return False  # explicit non-codex mode
-        normalized_base = (base_url_str or "").strip().lower()
-        if "api.openai.com" in normalized_base and "openrouter" not in normalized_base:
+        if base_url_hostname(base_url_str) == "api.openai.com":
             model_lower = (model_str or "").lower()
             if "codex" in model_lower:
                 return True
@@ -1739,7 +1811,13 @@ def resolve_provider_client(
 
     # ── Nous Portal (OAuth) ──────────────────────────────────────────
     if provider == "nous":
-        client, default = _try_nous()
+        # Detect vision tasks: either explicit model override from
+        # _PROVIDER_VISION_MODELS, or caller passed a known vision model.
+        _is_vision = (
+            model in _PROVIDER_VISION_MODELS.values()
+            or (model or "").strip().lower() == "mimo-v2-omni"
+        )
+        client, default = _try_nous(vision=_is_vision)
         if client is None:
             logger.warning("resolve_provider_client: nous requested "
                            "but Nous Portal not configured (run: hermes auth)")
@@ -1795,9 +1873,9 @@ def resolve_provider_client(
                 provider,
             )
             extra = {}
-            if "api.kimi.com" in custom_base.lower():
-                extra["default_headers"] = {"User-Agent": "KimiCLI/1.30.0"}
-            elif "api.githubcopilot.com" in custom_base.lower():
+            if base_url_host_matches(custom_base, "api.kimi.com"):
+                extra["default_headers"] = {"User-Agent": "claude-code/0.1.0"}
+            elif base_url_host_matches(custom_base, "api.githubcopilot.com"):
                 from hermes_cli.models import copilot_default_headers
                 extra["default_headers"] = copilot_default_headers()
             client = OpenAI(api_key=custom_key, base_url=custom_base, **extra)
@@ -1921,9 +1999,9 @@ def resolve_provider_client(
 
         # Provider-specific headers
         headers = {}
-        if "api.kimi.com" in base_url.lower():
-            headers["User-Agent"] = "KimiCLI/1.30.0"
-        elif "api.githubcopilot.com" in base_url.lower():
+        if base_url_host_matches(base_url, "api.kimi.com"):
+            headers["User-Agent"] = "claude-code/0.1.0"
+        elif base_url_host_matches(base_url, "api.githubcopilot.com"):
             from hermes_cli.models import copilot_default_headers
 
             headers.update(copilot_default_headers())
@@ -2154,24 +2232,35 @@ def resolve_vision_provider_client(
         #      _PROVIDER_VISION_MODELS provides per-provider vision model
         #      overrides when the provider has a dedicated multimodal model
         #      that differs from the chat model (e.g. xiaomi → mimo-v2-omni,
-        #      zai → glm-5v-turbo).
+        #      zai → glm-5v-turbo). Nous is the exception: it has a dedicated
+        #      strict vision backend with tier-aware defaults, so it must not
+        #      fall through to the user's text chat model here.
         #   2. OpenRouter  (vision-capable aggregator fallback)
         #   3. Nous Portal (vision-capable aggregator fallback)
         #   4. Stop
         main_provider = _read_main_provider()
         main_model = _read_main_model()
         if main_provider and main_provider not in ("auto", ""):
-            vision_model = _PROVIDER_VISION_MODELS.get(main_provider, main_model)
-            rpc_client, rpc_model = resolve_provider_client(
-                main_provider, vision_model,
-                api_mode=resolved_api_mode)
-            if rpc_client is not None:
-                logger.info(
-                    "Vision auto-detect: using main provider %s (%s)",
-                    main_provider, rpc_model or vision_model,
-                )
-                return _finalize(
-                    main_provider, rpc_client, rpc_model or vision_model)
+            if main_provider == "nous":
+                sync_client, default_model = _resolve_strict_vision_backend(main_provider)
+                if sync_client is not None:
+                    logger.info(
+                        "Vision auto-detect: using main provider %s (%s)",
+                        main_provider, default_model or resolved_model or main_model,
+                    )
+                    return _finalize(main_provider, sync_client, default_model)
+            else:
+                vision_model = _PROVIDER_VISION_MODELS.get(main_provider, main_model)
+                rpc_client, rpc_model = resolve_provider_client(
+                    main_provider, vision_model,
+                    api_mode=resolved_api_mode)
+                if rpc_client is not None:
+                    logger.info(
+                        "Vision auto-detect: using main provider %s (%s)",
+                        main_provider, rpc_model or vision_model,
+                    )
+                    return _finalize(
+                        main_provider, rpc_client, rpc_model or vision_model)
 
         # Fall back through aggregators (uses their dedicated vision model,
         # not the user's main model) when main provider has no client.
@@ -2218,7 +2307,7 @@ def auxiliary_max_tokens_param(value: int) -> dict:
     # Only use max_completion_tokens for direct OpenAI custom endpoints
     if (not or_key
             and _read_nous_auth() is None
-            and "api.openai.com" in custom_base.lower()):
+            and base_url_hostname(custom_base) == "api.openai.com"):
         return {"max_completion_tokens": value}
     return {"max_tokens": value}
 
@@ -2244,6 +2333,76 @@ def auxiliary_max_tokens_param(value: int) -> dict:
 _client_cache: Dict[tuple, tuple] = {}
 _client_cache_lock = threading.Lock()
 _CLIENT_CACHE_MAX_SIZE = 64  # safety belt — evict oldest when exceeded
+
+
+def _client_cache_key(
+    provider: str,
+    *,
+    async_mode: bool,
+    base_url: Optional[str] = None,
+    api_key: Optional[str] = None,
+    api_mode: Optional[str] = None,
+    main_runtime: Optional[Dict[str, Any]] = None,
+) -> tuple:
+    runtime = _normalize_main_runtime(main_runtime)
+    runtime_key = tuple(runtime.get(field, "") for field in _MAIN_RUNTIME_FIELDS) if provider == "auto" else ()
+    return (provider, async_mode, base_url or "", api_key or "", api_mode or "", runtime_key)
+
+
+def _store_cached_client(cache_key: tuple, client: Any, default_model: Optional[str], *, bound_loop: Any = None) -> None:
+    with _client_cache_lock:
+        old_entry = _client_cache.get(cache_key)
+        if old_entry is not None and old_entry[0] is not client:
+            _force_close_async_httpx(old_entry[0])
+            try:
+                close_fn = getattr(old_entry[0], "close", None)
+                if callable(close_fn):
+                    close_fn()
+            except Exception:
+                pass
+        _client_cache[cache_key] = (client, default_model, bound_loop)
+
+
+def _refresh_nous_auxiliary_client(
+    *,
+    cache_provider: str,
+    model: Optional[str],
+    async_mode: bool,
+    base_url: Optional[str] = None,
+    api_key: Optional[str] = None,
+    api_mode: Optional[str] = None,
+    main_runtime: Optional[Dict[str, Any]] = None,
+) -> Tuple[Optional[Any], Optional[str]]:
+    """Refresh Nous runtime creds, rebuild the client, and replace the cache entry."""
+    runtime = _resolve_nous_runtime_api(force_refresh=True)
+    if runtime is None:
+        return None, model
+
+    fresh_key, fresh_base_url = runtime
+    sync_client = OpenAI(api_key=fresh_key, base_url=fresh_base_url)
+    final_model = model
+
+    current_loop = None
+    if async_mode:
+        try:
+            import asyncio as _aio
+            current_loop = _aio.get_event_loop()
+        except RuntimeError:
+            pass
+        client, final_model = _to_async_client(sync_client, final_model or "")
+    else:
+        client = sync_client
+
+    cache_key = _client_cache_key(
+        cache_provider,
+        async_mode=async_mode,
+        base_url=base_url,
+        api_key=api_key,
+        api_mode=api_mode,
+        main_runtime=main_runtime,
+    )
+    _store_cached_client(cache_key, client, final_model, bound_loop=current_loop)
+    return client, final_model
 
 
 def neuter_async_httpx_del() -> None:
@@ -2347,7 +2506,7 @@ def cleanup_stale_async_clients() -> None:
 
 def _is_openrouter_client(client: Any) -> bool:
     for obj in (client, getattr(client, "_client", None), getattr(client, "client", None)):
-        if obj and "openrouter" in str(getattr(obj, "base_url", "") or "").lower():
+        if obj and base_url_host_matches(str(getattr(obj, "base_url", "") or ""), "openrouter.ai"):
             return True
     return False
 
@@ -2399,8 +2558,14 @@ def _get_cached_client(
         except RuntimeError:
             pass
     runtime = _normalize_main_runtime(main_runtime)
-    runtime_key = tuple(runtime.get(field, "") for field in _MAIN_RUNTIME_FIELDS) if provider == "auto" else ()
-    cache_key = (provider, async_mode, base_url or "", api_key or "", api_mode or "", runtime_key)
+    cache_key = _client_cache_key(
+        provider,
+        async_mode=async_mode,
+        base_url=base_url,
+        api_key=api_key,
+        api_mode=api_mode,
+        main_runtime=main_runtime,
+    )
     with _client_cache_lock:
         if cache_key in _client_cache:
             cached_client, cached_default, cached_loop = _client_cache[cache_key]
@@ -2653,7 +2818,7 @@ def _build_call_kwargs(
         # Direct OpenAI api.openai.com with newer models needs max_completion_tokens.
         if provider == "custom":
             custom_base = base_url or _current_custom_base_url()
-            if "api.openai.com" in custom_base.lower():
+            if base_url_hostname(custom_base) == "api.openai.com":
                 kwargs["max_completion_tokens"] = max_tokens
             else:
                 kwargs["max_tokens"] = max_tokens
