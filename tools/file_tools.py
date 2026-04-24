@@ -78,13 +78,45 @@ _BLOCKED_DEVICE_PATHS = frozenset({
 })
 
 
-def _resolve_path(filepath: str) -> Path:
+def _resolve_path(filepath: str, task_id: str = "default") -> Path:
     """Resolve a path relative to TERMINAL_CWD (the worktree base directory)
     instead of the main repository root.
     """
+    return _resolve_path_for_task(filepath, task_id)
+
+
+def _get_live_tracking_cwd(task_id: str = "default") -> str | None:
+    """Return the task's live terminal cwd for bookkeeping when available."""
+    with _file_ops_lock:
+        cached = _file_ops_cache.get(task_id)
+    if cached is not None:
+        live_cwd = getattr(getattr(cached, "env", None), "cwd", None) or getattr(
+            cached, "cwd", None
+        )
+        if live_cwd:
+            return live_cwd
+
+    try:
+        from tools.terminal_tool import _active_environments, _env_lock
+
+        with _env_lock:
+            env = _active_environments.get(task_id)
+            live_cwd = getattr(env, "cwd", None) if env is not None else None
+        if live_cwd:
+            return live_cwd
+    except Exception:
+        pass
+
+    return None
+
+
+def _resolve_path_for_task(filepath: str, task_id: str = "default") -> Path:
+    """Resolve *filepath* against the task's live terminal cwd when possible."""
     p = Path(filepath).expanduser()
     if not p.is_absolute():
-        base = os.environ.get("TERMINAL_CWD", os.getcwd())
+        base = _get_live_tracking_cwd(task_id) or os.environ.get(
+            "TERMINAL_CWD", os.getcwd()
+        )
         p = Path(base) / p
     return p.resolve()
 
@@ -183,10 +215,10 @@ def _check_bound_channel_permission(filepath: str, task_id: str) -> Optional[str
     )
 
 
-def _check_sensitive_path(filepath: str) -> Optional[str]:
+def _check_sensitive_path(filepath: str, task_id: str = "default") -> str | None:
     """Return an error message if the path targets a sensitive system location."""
     try:
-        resolved = str(_resolve_path(filepath))
+        resolved = str(_resolve_path_for_task(filepath, task_id))
     except (OSError, ValueError):
         resolved = filepath
     normalized = os.path.normpath(os.path.expanduser(filepath))
@@ -433,7 +465,7 @@ def read_file_tool(path: str, offset: int = 1, limit: int = 500, task_id: str = 
                 ),
             })
 
-        _resolved = _resolve_path(path)
+        _resolved = _resolve_path_for_task(path, task_id)
 
         # ── Binary file guard ─────────────────────────────────────────
         # Block binary files by extension (no I/O).
@@ -639,7 +671,7 @@ def _update_read_timestamp(filepath: str, task_id: str) -> None:
     refreshes the stored timestamp to match the file's new state.
     """
     try:
-        resolved = str(_resolve_path(filepath))
+        resolved = str(_resolve_path_for_task(filepath, task_id))
         current_mtime = os.path.getmtime(resolved)
     except (OSError, ValueError):
         return
@@ -658,7 +690,7 @@ def _check_file_staleness(filepath: str, task_id: str) -> Optional[str]:
     or was never read.  Does not block — the write still proceeds.
     """
     try:
-        resolved = str(_resolve_path(filepath))
+        resolved = str(_resolve_path_for_task(filepath, task_id))
     except (OSError, ValueError):
         return None
     with _read_tracker_lock:
@@ -683,7 +715,7 @@ def _check_file_staleness(filepath: str, task_id: str) -> Optional[str]:
 
 def write_file_tool(path: str, content: str, task_id: str = "default") -> str:
     """Write content to a file."""
-    sensitive_err = _check_sensitive_path(path)
+    sensitive_err = _check_sensitive_path(path, task_id)
     if sensitive_err:
         return tool_error(sensitive_err)
     bound_err = _check_bound_channel_permission(path, task_id)
@@ -694,7 +726,7 @@ def write_file_tool(path: str, content: str, task_id: str = "default") -> str:
         # fall back to the legacy path — write proceeds, per-task staleness
         # check below still runs.
         try:
-            _resolved = str(_resolve_path(path))
+            _resolved = str(_resolve_path_for_task(path, task_id))
         except Exception:
             _resolved = None
 
@@ -749,7 +781,7 @@ def patch_tool(mode: str = "replace", path: str = None, old_string: str = None,
         for _m in _re.finditer(r'^\*\*\*\s+(?:Update|Add|Delete)\s+File:\s*(.+)$', patch, _re.MULTILINE):
             _paths_to_check.append(_m.group(1).strip())
     for _p in _paths_to_check:
-        sensitive_err = _check_sensitive_path(_p)
+        sensitive_err = _check_sensitive_path(_p, task_id)
         if sensitive_err:
             return tool_error(sensitive_err)
         bound_err = _check_bound_channel_permission(_p, task_id)
@@ -763,7 +795,7 @@ def patch_tool(mode: str = "replace", path: str = None, old_string: str = None,
         _seen: set[str] = set()
         for _p in _paths_to_check:
             try:
-                _r = str(_resolve_path(_p))
+                _r = str(_resolve_path_for_task(_p, task_id))
             except Exception:
                 _r = None
             if _r and _r not in _seen:
@@ -785,7 +817,7 @@ def patch_tool(mode: str = "replace", path: str = None, old_string: str = None,
             _path_to_resolved: dict[str, str] = {}
             for _p in _paths_to_check:
                 try:
-                    _r = str(_resolve_path(_p))
+                    _r = str(_resolve_path_for_task(_p, task_id))
                 except Exception:
                     _r = None
                 _path_to_resolved[_p] = _r
@@ -820,15 +852,17 @@ def patch_tool(mode: str = "replace", path: str = None, old_string: str = None,
                     _r = _path_to_resolved.get(_p)
                     if _r:
                         file_state.note_write(task_id, _r)
-        result_json = json.dumps(result_dict, ensure_ascii=False)
         # Hint when old_string not found — saves iterations where the agent
         # retries with stale content instead of re-reading the file.
         # Suppressed when patch_replace already attached a rich "Did you mean?"
         # snippet (which is strictly more useful than the generic hint).
         if result_dict.get("error") and "Could not find" in str(result_dict["error"]):
             if "Did you mean one of these sections?" not in str(result_dict["error"]):
-                result_json += "\n\n[Hint: old_string not found. Use read_file to verify the current content, or search_files to locate the text.]"
-        return result_json
+                result_dict["_hint"] = (
+                    "old_string not found. Use read_file to verify the current "
+                    "content, or search_files to locate the text."
+                )
+        return json.dumps(result_dict, ensure_ascii=False)
     except Exception as e:
         return tool_error(str(e))
 
