@@ -1,0 +1,12 @@
+name = "smart-router"
+main = "src/index.ts"
+compatibility_date = "2025-04-24"
+
+# Durable Object binding for health tracking
+[[durable_objects.bindings]]
+name = "HEALTH_TRACKER"
+class_name = "HealthTracker"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["HealthTracker"]
