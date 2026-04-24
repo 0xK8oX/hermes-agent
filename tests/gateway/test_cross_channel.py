@@ -463,7 +463,199 @@ class TestSendMessageTriggerAgent:
 
 
 # ---------------------------------------------------------------------------
-# 6. Session context propagation
+# 6. Recursion guard (C5)
+# ---------------------------------------------------------------------------
+
+class TestRecursionGuard:
+    def setup_method(self):
+        from gateway.extensions.cross_channel import _tls
+        _tls.dispatch_depth = 0
+
+    @pytest.mark.asyncio
+    async def test_blocks_at_depth_3(self):
+        from gateway.extensions.cross_channel import inject_cross_channel_message
+        import gateway.extensions.cross_channel as cc
+        cc._tls.dispatch_depth = 3
+
+        result = await inject_cross_channel_message(
+            adapters={},
+            target_platform="discord",
+            target_chat_id="123",
+            text="hello",
+        )
+        assert "error" in result
+        assert "recursion" in result["error"].lower()
+
+    @pytest.mark.asyncio
+    async def test_increments_and_restores_depth(self):
+        from gateway.extensions.cross_channel import inject_cross_channel_message
+        import gateway.extensions.cross_channel as cc
+        from gateway.config import Platform
+        cc._tls.dispatch_depth = 0
+
+        mock_adapter = MagicMock()
+        mock_adapter.handle_message = AsyncMock(return_value=None)
+
+        result = await inject_cross_channel_message(
+            adapters={Platform.DISCORD: mock_adapter},
+            target_platform="discord",
+            target_chat_id="123",
+            text="hello",
+        )
+        # After execution, depth should be restored to 0
+        assert cc._tls.dispatch_depth == 0
+
+
+# ---------------------------------------------------------------------------
+# 7. Rate limiting (L6)
+# ---------------------------------------------------------------------------
+
+class TestRateLimiting:
+    def setup_method(self):
+        from gateway.extensions.cross_channel import reset_rate_limit
+        reset_rate_limit()
+
+    @pytest.mark.asyncio
+    async def test_rate_limits_same_target(self):
+        from gateway.extensions.cross_channel import inject_cross_channel_message
+        from gateway.config import Platform
+
+        mock_adapter = MagicMock()
+        mock_adapter.handle_message = AsyncMock(return_value=None)
+
+        result1 = await inject_cross_channel_message(
+            adapters={Platform.DISCORD: mock_adapter},
+            target_platform="discord",
+            target_chat_id="123",
+            text="first",
+        )
+        assert result1.get("success") is True
+
+        # Immediate second dispatch to same target should be rate limited
+        result2 = await inject_cross_channel_message(
+            adapters={Platform.DISCORD: mock_adapter},
+            target_platform="discord",
+            target_chat_id="123",
+            text="second",
+        )
+        assert "error" in result2
+        assert "rate limited" in result2["error"].lower()
+
+    @pytest.mark.asyncio
+    async def test_different_targets_not_rate_limited(self):
+        from gateway.extensions.cross_channel import inject_cross_channel_message
+        from gateway.config import Platform
+
+        mock_adapter = MagicMock()
+        mock_adapter.handle_message = AsyncMock(return_value=None)
+
+        result1 = await inject_cross_channel_message(
+            adapters={Platform.DISCORD: mock_adapter},
+            target_platform="discord",
+            target_chat_id="123",
+            text="first",
+        )
+        assert result1.get("success") is True
+
+        # Different chat_id should not be rate limited
+        result2 = await inject_cross_channel_message(
+            adapters={Platform.DISCORD: mock_adapter},
+            target_platform="discord",
+            target_chat_id="456",
+            text="second",
+        )
+        assert result2.get("success") is True
+
+
+# ---------------------------------------------------------------------------
+# 8. Auth check (H5)
+# ---------------------------------------------------------------------------
+
+class TestAuthCheck:
+    def setup_method(self):
+        from gateway.extensions.cross_channel import reset_rate_limit
+        reset_rate_limit()
+
+    @pytest.mark.asyncio
+    async def test_allows_when_no_source_platform(self):
+        """No source_platform/source_chat_id → skips auth check entirely."""
+        from gateway.extensions.cross_channel import inject_cross_channel_message
+        from gateway.config import Platform
+
+        mock_adapter = MagicMock()
+        mock_adapter.handle_message = AsyncMock(return_value=None)
+
+        result = await inject_cross_channel_message(
+            adapters={Platform.DISCORD: mock_adapter},
+            target_platform="discord",
+            target_chat_id="123",
+            text="hello",
+        )
+        assert result.get("success") is True
+
+    @pytest.mark.asyncio
+    async def test_warns_when_unbound_source(self):
+        """Source channel not bound → logs warning but still dispatches."""
+        from gateway.extensions.cross_channel import inject_cross_channel_message
+        from gateway.config import Platform
+
+        mock_adapter = MagicMock()
+        mock_adapter.handle_message = AsyncMock(return_value=None)
+
+        with patch("gateway.extensions.channel_binding.is_channel_bound", return_value=False):
+            result = await inject_cross_channel_message(
+                adapters={Platform.DISCORD: mock_adapter},
+                target_platform="discord",
+                target_chat_id="123",
+                text="hello",
+                source_platform="telegram",
+                source_chat_id="999",
+            )
+        assert result.get("success") is True
+
+    @pytest.mark.asyncio
+    async def test_allows_when_bound_source(self):
+        """Source channel bound → dispatches normally."""
+        from gateway.extensions.cross_channel import inject_cross_channel_message
+        from gateway.config import Platform
+
+        mock_adapter = MagicMock()
+        mock_adapter.handle_message = AsyncMock(return_value=None)
+
+        with patch("gateway.extensions.channel_binding.is_channel_bound", return_value=True):
+            result = await inject_cross_channel_message(
+                adapters={Platform.DISCORD: mock_adapter},
+                target_platform="discord",
+                target_chat_id="123",
+                text="hello",
+                source_platform="telegram",
+                source_chat_id="999",
+            )
+        assert result.get("success") is True
+
+    @pytest.mark.asyncio
+    async def test_survives_auth_check_exception(self):
+        """Auth check raises → logs debug and continues."""
+        from gateway.extensions.cross_channel import inject_cross_channel_message
+        from gateway.config import Platform
+
+        mock_adapter = MagicMock()
+        mock_adapter.handle_message = AsyncMock(return_value=None)
+
+        with patch("gateway.extensions.channel_binding.is_channel_bound", side_effect=RuntimeError("boom")):
+            result = await inject_cross_channel_message(
+                adapters={Platform.DISCORD: mock_adapter},
+                target_platform="discord",
+                target_chat_id="123",
+                text="hello",
+                source_platform="telegram",
+                source_chat_id="999",
+            )
+        assert result.get("success") is True
+
+
+# ---------------------------------------------------------------------------
+# 9. Session context propagation
 # ---------------------------------------------------------------------------
 
 class TestSessionContextPropagation:

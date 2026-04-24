@@ -591,7 +591,213 @@ class TestDispatchWatcherRetryBackoff:
         assert not pending.exists()
 
 
-# ── 5. Thread safety ───────────────────────────────────────────────
+# ── 5. Hook functions ──────────────────────────────────────────────
+
+
+class TestHookFunctions:
+    """_get_ephemeral and _on_session_cleanup are called by run.py via hooks."""
+
+    def test_get_ephemeral_returns_none_when_no_soul(self, temp_hall):
+        from gateway.extensions.hall import _get_ephemeral
+        assert _get_ephemeral("some_session") is None
+
+    def test_get_ephemeral_returns_none_when_no_unread(self, temp_hall):
+        from gateway.extensions.hall import _get_ephemeral
+        with patch("gateway.extensions.hall._get_soul_name", return_value="dev"):
+            assert _get_ephemeral("session-123") is None
+
+    def test_get_ephemeral_injects_unread_messages(self, temp_hall):
+        from gateway.extensions.hall import _get_ephemeral, hall_send
+        hall_send("pm", "dev", "Task", "Do this")
+        with patch("gateway.extensions.hall._get_soul_name", return_value="dev"):
+            result = _get_ephemeral("session-123")
+        assert result is not None
+        assert "Hall" in result
+        assert "pm" in result
+        assert "Task" in result
+
+    def test_get_ephemeral_marks_as_read(self, temp_hall):
+        from gateway.extensions.hall import _get_ephemeral, hall_send, hall_read
+        hall_send("pm", "dev", "Task", "Do this")
+        with patch("gateway.extensions.hall._get_soul_name", return_value="dev"):
+            _get_ephemeral("session-123")
+        # Should be marked as read
+        assert hall_read("dev") == []
+
+    def test_get_ephemeral_includes_high_priority_badge(self, temp_hall):
+        from gateway.extensions.hall import _get_ephemeral, hall_send
+        hall_send("pm", "dev", "Urgent", "Do this", priority="high")
+        with patch("gateway.extensions.hall._get_soul_name", return_value="dev"):
+            result = _get_ephemeral("session-123")
+        assert "🔴" in result
+
+    def test_on_session_cleanup_calls_hall_clear(self, temp_hall):
+        from gateway.extensions.hall import _on_session_cleanup, hall_send, hall_list
+        hall_send("pm", "dev", "Old", "Body")
+        # _on_session_cleanup calls hall_clear(older_than_days=30)
+        # so the message won't be cleared unless it's >30 days old.
+        # Just verify it doesn't raise and the function was called.
+        _on_session_cleanup("session-123")
+        # Message still there (not old enough)
+        assert len(hall_list()) == 1
+
+
+class TestAdminSoulCheck:
+    """_is_admin_soul validates admin status from bindings or legacy names."""
+
+    def test_alpha_is_admin_legacy(self, temp_hall):
+        from gateway.extensions.hall import _is_admin_soul
+        assert _is_admin_soul("alpha") is True
+        assert _is_admin_soul("ALPHA") is True
+
+    def test_pm_is_admin_legacy(self, temp_hall):
+        from gateway.extensions.hall import _is_admin_soul
+        assert _is_admin_soul("pm") is True
+
+    def test_regular_soul_is_not_admin(self, temp_hall):
+        from gateway.extensions.hall import _is_admin_soul
+        assert _is_admin_soul("dev") is False
+
+    def test_empty_soul_is_not_admin(self, temp_hall):
+        from gateway.extensions.hall import _is_admin_soul
+        assert _is_admin_soul("") is False
+
+    def test_admin_from_env_and_binding(self, temp_hall):
+        from gateway.extensions.hall import _is_admin_soul
+        with patch.dict("os.environ", {"GATEWAY_ADMIN_USERS": "12345"}):
+            with patch("gateway.extensions.hall._lookup_soul_channel", return_value={"platform": "telegram", "chat_id": "123"}):
+                with patch("gateway.extensions.channel_binding._get_all_platform_bindings", return_value={
+                    "telegram": [{"soul": "dev", "user_id": "12345", "id": "123"}]
+                }):
+                    assert _is_admin_soul("dev") is True
+
+    def test_non_admin_binding_user_id(self, temp_hall):
+        from gateway.extensions.hall import _is_admin_soul
+        with patch.dict("os.environ", {"GATEWAY_ADMIN_USERS": "99999"}):
+            with patch("gateway.extensions.hall._lookup_soul_channel", return_value={"platform": "telegram", "chat_id": "123"}):
+                with patch("gateway.extensions.channel_binding._get_all_platform_bindings", return_value={
+                    "telegram": [{"soul": "dev", "user_id": "12345", "id": "123"}]
+                }):
+                    assert _is_admin_soul("dev") is False
+
+
+class TestSoulResolution:
+    """_get_soul_name and _lookup_soul_channel resolution."""
+
+    def test_get_soul_name_from_binding_state(self, temp_hall):
+        from gateway.extensions.hall import _get_soul_name
+        with patch("gateway.extensions.channel_binding._session_soul_names", {"sess-1": "pm"}):
+            assert _get_soul_name("sess-1") == "pm"
+
+    def test_get_soul_name_returns_none_when_no_binding(self, temp_hall):
+        from gateway.extensions.hall import _get_soul_name
+        with patch("gateway.extensions.channel_binding._session_soul_names", {}):
+            assert _get_soul_name("sess-1") is None
+
+    def test_get_soul_name_survives_import_error(self, temp_hall):
+        from gateway.extensions.hall import _get_soul_name
+        with patch("gateway.extensions.hall._get_soul_name", side_effect=ImportError("no module")):
+            # Test the actual fallback by calling a wrapper
+            pass
+        # Just verify the real function handles missing module gracefully
+        with patch.dict("sys.modules", {"gateway.extensions.channel_binding": None}):
+            assert _get_soul_name("sess-1") is None
+
+    def test_lookup_soul_channel_finds_match(self, temp_hall):
+        from gateway.extensions.hall import _lookup_soul_channel
+        with patch("gateway.extensions.channel_binding._get_all_platform_bindings", return_value={
+            "telegram": [{"soul": "dev", "id": "123"}]
+        }):
+            result = _lookup_soul_channel("dev")
+        assert result == {"platform": "telegram", "chat_id": "123"}
+
+    def test_lookup_soul_channel_normalizes_case(self, temp_hall):
+        from gateway.extensions.hall import _lookup_soul_channel
+        with patch("gateway.extensions.channel_binding._get_all_platform_bindings", return_value={
+            "telegram": [{"soul": "DEV", "id": "123"}]
+        }):
+            result = _lookup_soul_channel("dev")
+        assert result == {"platform": "telegram", "chat_id": "123"}
+
+    def test_lookup_soul_channel_returns_none_when_no_bindings(self, temp_hall):
+        from gateway.extensions.hall import _lookup_soul_channel
+        with patch("gateway.extensions.channel_binding._get_all_platform_bindings", return_value={}):
+            assert _lookup_soul_channel("dev") is None
+
+    def test_lookup_soul_channel_survives_exception(self, temp_hall):
+        from gateway.extensions.hall import _lookup_soul_channel
+        with patch("gateway.extensions.channel_binding._get_all_platform_bindings", side_effect=RuntimeError("boom")):
+            assert _lookup_soul_channel("dev") is None
+
+    def test_lookup_soul_channel_skips_non_dict_bindings(self, temp_hall):
+        from gateway.extensions.hall import _lookup_soul_channel
+        with patch("gateway.extensions.channel_binding._get_all_platform_bindings", return_value={
+            "telegram": ["bad-binding", {"soul": "dev", "id": "123"}]
+        }):
+            result = _lookup_soul_channel("dev")
+        assert result == {"platform": "telegram", "chat_id": "123"}
+
+
+class TestHallClearWithSoulFilter:
+    """hall_clear with soul filter purges only matching messages."""
+
+    def test_clear_with_soul_filter(self, temp_hall):
+        from gateway.extensions.hall import hall_send, hall_clear, hall_list
+        hall_send("pm", "dev", "Dev msg", "Body")
+        hall_send("pm", "ops", "Ops msg", "Body")
+
+        removed = hall_clear(soul="dev", older_than_days=0)
+        assert removed == 1
+
+        remaining = hall_list()
+        assert len(remaining) == 1
+        assert remaining[0]["to"] == "ops"
+
+    def test_clear_with_soul_keeps_broadcast(self, temp_hall):
+        from gateway.extensions.hall import hall_send, hall_clear, hall_list
+        hall_send("pm", "all", "Broadcast", "Body")
+        hall_send("pm", "dev", "Dev msg", "Body")
+
+        removed = hall_clear(soul="dev", older_than_days=0)
+        # broadcast "all" matches dev too, so it should also be removed
+        assert removed == 2
+
+    def test_clear_invalid_timestamp_defaults_to_epoch(self, temp_hall):
+        from gateway.extensions.hall import hall_send, hall_clear, hall_list
+        # Create a message with invalid timestamp
+        entry = hall_send("pm", "dev", "Bad ts", "Body")
+        entry["ts"] = "invalid-timestamp"
+        # Rewrite the file with bad timestamp
+        from gateway.extensions.hall import _write_all_entries, _read_all_entries
+        entries = _read_all_entries()
+        for e in entries:
+            if e["id"] == entry["id"]:
+                e["ts"] = "invalid-timestamp"
+        _write_all_entries(entries)
+
+        removed = hall_clear(older_than_days=30)
+        # Invalid timestamp defaults to epoch 0, which is very old
+        assert removed >= 1
+
+
+class TestHallMarkReadEdgeCases:
+    """Edge cases for hall_mark_read."""
+
+    def test_mark_read_already_read(self, temp_hall):
+        from gateway.extensions.hall import hall_send, hall_mark_read, hall_read
+        entry = hall_send("pm", "dev", "Task", "Body")
+        hall_mark_read(entry["id"], "dev")
+        # Second mark returns False because soul already in read_by
+        result = hall_mark_read(entry["id"], "dev")
+        assert result is False
+
+    def test_mark_read_empty_inputs(self, temp_hall):
+        from gateway.extensions.hall import hall_mark_read
+        assert hall_mark_read("", "dev") is False
+        assert hall_mark_read("id", "") is False
+
+
+# ── 6. Thread safety ───────────────────────────────────────────────
 
 
 class TestHallThreadSafety:

@@ -350,3 +350,98 @@ class TestCheckpointFormat:
         result = _on_get_checkpoint(sk)
         # Response should not contain the full 1000-char message
         assert len(result) < 1500
+
+
+# ---------------------------------------------------------------------------
+# Tests — error paths and edge cases
+# ---------------------------------------------------------------------------
+
+class TestErrorPaths:
+    def test_load_corrupted_checkpoint_returns_none(self, tmp_path):
+        from gateway.extensions.session_checkpoint import _on_get_checkpoint
+        sk = _sk()
+        cp_file = tmp_path / "checkpoints" / "telegram" / "12345.json"
+        cp_file.parent.mkdir(parents=True, exist_ok=True)
+        cp_file.write_text("not json", encoding="utf-8")
+
+        import gateway.extensions.session_checkpoint as scm
+        scm._cache.clear()
+
+        result = _on_get_checkpoint(sk)
+        assert result is None
+
+    def test_save_disk_error_is_logged(self, tmp_path, caplog):
+        from gateway.extensions.session_checkpoint import _on_save_checkpoint
+        import logging
+        sk = _sk()
+
+        with patch("pathlib.Path.write_text", side_effect=OSError("disk full")):
+            with caplog.at_level(logging.WARNING):
+                _on_save_checkpoint(sk, "sess", "msg", "resp")
+        assert "disk full" in caplog.text or "save error" in caplog.text
+
+    def test_get_checkpoint_empty_session_key(self):
+        from gateway.extensions.session_checkpoint import _on_get_checkpoint
+        assert _on_get_checkpoint("") is None
+
+    def test_cleanup_empty_session_key(self):
+        from gateway.extensions.session_checkpoint import _on_session_cleanup
+        # Should not raise
+        _on_session_cleanup("")
+
+    def test_load_missing_checkpoint_returns_none(self, tmp_path):
+        from gateway.extensions.session_checkpoint import _on_get_checkpoint
+        import gateway.extensions.session_checkpoint as scm
+        scm._cache.clear()
+        assert _on_get_checkpoint(_sk()) is None
+
+
+# ---------------------------------------------------------------------------
+# Tests — _cleanup_expired
+# ---------------------------------------------------------------------------
+
+class TestCleanupExpired:
+    def test_removes_expired_files(self, tmp_path):
+        from gateway.extensions.session_checkpoint import _cleanup_expired
+        sk = _sk()
+        cp_file = tmp_path / "checkpoints" / "telegram" / "12345.json"
+        cp_file.parent.mkdir(parents=True, exist_ok=True)
+        cp_file.write_text(
+            json.dumps({"timestamp": time.time() - 25 * 3600}),
+            encoding="utf-8",
+        )
+
+        removed = _cleanup_expired()
+        assert removed == 1
+        assert not cp_file.exists()
+
+    def test_keeps_fresh_files(self, tmp_path):
+        from gateway.extensions.session_checkpoint import _cleanup_expired
+        sk = _sk()
+        cp_file = tmp_path / "checkpoints" / "telegram" / "12345.json"
+        cp_file.parent.mkdir(parents=True, exist_ok=True)
+        cp_file.write_text(
+            json.dumps({"timestamp": time.time()}),
+            encoding="utf-8",
+        )
+
+        removed = _cleanup_expired()
+        assert removed == 0
+        assert cp_file.exists()
+
+    def test_removes_corrupted_files(self, tmp_path):
+        from gateway.extensions.session_checkpoint import _cleanup_expired
+        cp_file = tmp_path / "checkpoints" / "telegram" / "bad.json"
+        cp_file.parent.mkdir(parents=True, exist_ok=True)
+        cp_file.write_text("not json", encoding="utf-8")
+
+        removed = _cleanup_expired()
+        assert removed == 1
+        assert not cp_file.exists()
+
+    def test_noop_when_dir_missing(self, tmp_path):
+        from gateway.extensions.session_checkpoint import _cleanup_expired
+        # Ensure checkpoints dir doesn't exist
+        with patch("gateway.extensions.session_checkpoint._get_checkpoints_dir", return_value=tmp_path / "nonexistent"):
+            removed = _cleanup_expired()
+        assert removed == 0
