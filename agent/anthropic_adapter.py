@@ -322,6 +322,14 @@ def _is_third_party_anthropic_endpoint(base_url: Optional[str]) -> bool:
     return True  # Any other endpoint is a third-party proxy
 
 
+def _is_kimi_coding_endpoint(base_url: str | None) -> bool:
+    """Return True for Kimi's /coding endpoint that requires claude-code UA."""
+    normalized = _normalize_base_url_text(base_url)
+    if not normalized:
+        return False
+    return normalized.rstrip("/").lower().startswith("https://api.kimi.com/coding")
+
+
 def _requires_bearer_auth(base_url: Optional[str]) -> bool:
     """Return True for Anthropic-compatible providers that require Bearer auth.
 
