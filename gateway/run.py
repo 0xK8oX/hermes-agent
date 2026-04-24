@@ -506,7 +506,7 @@ def _platform_config_key(platform: "Platform") -> str:
 
 def _load_gateway_config() -> dict:
     """Load and parse ~/.hermes/config.yaml, returning {} on any error.
-    
+
     Environment variable references (``${VAR_NAME}``) in string values
     are expanded via :func:`os.path.expandvars` so that sensitive keys
     can be kept in ``~/.hermes/.env`` instead of the yaml file.
@@ -518,7 +518,7 @@ def _load_gateway_config() -> dict:
             with open(config_path, 'r', encoding='utf-8') as f:
                 cfg = yaml.safe_load(f) or {}
             # Recursively expand ${ENV_VAR} in all string values
-            _expand_env_vars(cfg)
+            cfg = _expand_env_vars(cfg)
             return cfg
     except Exception:
         logger.debug("Could not load gateway config from %s", _hermes_home / 'config.yaml')
@@ -527,7 +527,7 @@ def _load_gateway_config() -> dict:
 
 def _expand_env_vars(obj):
     """Recursively expand ``${VAR}`` references in dict/list/string structures.
-    
+
     Returns a new copy — the original config dict is NOT mutated, preventing
     expanded API keys from leaking into logs or serialization.
     """
@@ -2362,7 +2362,8 @@ class GatewayRunner:
         # Start hall pending dispatch watcher — picks up auto-dispatch requests
         # written by subprocess callers (cron, agent tools) and executes them
         # in the gateway process where cross-channel dispatch is available.
-        asyncio.create_task(self._hall_dispatch_watcher())
+        from gateway.extensions.hall import start_hall_dispatch_watcher
+        asyncio.create_task(start_hall_dispatch_watcher(lambda: self._running))
 
         logger.info("Press Ctrl+C to stop")
         
@@ -2647,68 +2648,6 @@ class GatewayRunner:
 
             # Check every 10 seconds for platforms that need reconnection
             for _ in range(10):
-                if not self._running:
-                    return
-                await asyncio.sleep(1)
-
-    async def _hall_dispatch_watcher(self, interval: int = 3) -> None:
-        """Background task that processes pending Hall auto-dispatch requests.
-
-        When ``hall_send(dispatch="auto")`` is called from a subprocess (cron,
-        agent tool), it writes a pending file to ``~/.hermes/hall_dispatch/``.
-        This watcher scans that directory and executes the dispatch inside the
-        gateway process where ``get_gateway_runner()`` is available.
-        """
-        await asyncio.sleep(15)  # initial delay — let the gateway fully start
-        logger.info("[Hall-Dispatch-Watcher] Started, scanning every %ds", interval)
-
-        while self._running:
-            try:
-                from gateway.extensions.hall import _dispatch_dir, _execute_dispatch, _lookup_soul_channel
-                dispatch_dir = _dispatch_dir()
-                pending_files = sorted(dispatch_dir.glob("*.json"))
-
-                for pf in pending_files:
-                    if not self._running:
-                        return
-                    try:
-                        import json as _json
-                        entry = _json.loads(pf.read_text(encoding="utf-8"))
-                        to_soul = entry.get("to", "")
-                        target = _lookup_soul_channel(to_soul)
-
-                        if not target:
-                            logger.warning(
-                                "[Hall-Dispatch-Watcher] No channel found for soul '%s', discarding",
-                                to_soul,
-                            )
-                            pf.unlink(missing_ok=True)
-                            continue
-
-                        logger.info(
-                            "[Hall-Dispatch-Watcher] Processing pending dispatch: %s → %s",
-                            entry.get("from", "?"), to_soul,
-                        )
-                        # Run dispatch in thread pool to avoid blocking event loop
-                        loop = asyncio.get_event_loop()
-                        await loop.run_in_executor(None, _execute_dispatch, entry, target)
-
-                        # Only remove on successful dispatch
-                        pf.unlink(missing_ok=True)
-
-                    except _json.JSONDecodeError as e:
-                        logger.error("[Hall-Dispatch-Watcher] Corrupted file %s: %s — discarding", pf.name, e)
-                        pf.unlink(missing_ok=True)
-
-                    except Exception as e:
-                        logger.error("[Hall-Dispatch-Watcher] Dispatch failed for %s: %s — will retry", pf.name, e)
-                        # Keep file for retry on next scan
-
-            except Exception as e:
-                logger.error("[Hall-Dispatch-Watcher] Scan error: %s", e)
-
-            # Wait before next scan
-            for _ in range(interval):
                 if not self._running:
                     return
                 await asyncio.sleep(1)
@@ -6222,184 +6161,23 @@ class GatewayRunner:
 
     async def _handle_hall_send_command(self, event: MessageEvent) -> str:
         """Send a Hall message from the current soul to another soul."""
-        from gateway.extensions.channel_binding import _session_soul_names, _ensure_binding_loaded
-        from gateway.extensions.hall import hall_send, _is_admin_soul
-
-        args = event.get_command_args().strip()
-        if not args:
-            return (
-                "Usage: /hall-send <target_soul> [subject] | <body>\n"
-                "Example: /hall-send pm Status Update | Sprint review is done"
-            )
-
-        # Parse args: first word is target, rest is message. Optional subject separated by |
-        parts = args.split(None, 1)
-        to_soul = parts[0]
-        rest = parts[1] if len(parts) > 1 else ""
-
-        subject = ""
-        body = rest
-        if "|" in rest:
-            subj_part, body_part = rest.split("|", 1)
-            subject = subj_part.strip()
-            body = body_part.strip()
-
-        # Determine from_soul: check channel binding for current session
-        session_key = self._session_key_for_source(event.source)
-        _ensure_binding_loaded(session_key)
-        from_soul = _session_soul_names.get(session_key, "hall")
-
-        # Admin souls get auto-dispatch (immediate), others get queued
-        dispatch_mode = "auto" if _is_admin_soul(from_soul) else "queued"
-
-        try:
-            entry = hall_send(
-                from_soul=from_soul, to_soul=to_soul, subject=subject,
-                body=body, dispatch=dispatch_mode,
-            )
-            dispatch_tag = "⚡ auto" if dispatch_mode == "auto" else "📋 queued"
-            return (
-                f"✉️ Hall message sent! ({dispatch_tag})\n"
-                f"From: {from_soul} → To: {to_soul}\n"
-                f"Subject: {subject or '(none)'}\n"
-                f"ID: {entry.get('id', '?')}"
-            )
-        except Exception as e:
-            return f"Failed to send Hall message: {e}"
+        from gateway.extensions.hall import handle_hall_send
+        return await handle_hall_send(self, event)
 
     async def _handle_hall_read_command(self, event: MessageEvent) -> str:
         """Read unread Hall messages for the current soul."""
-        from gateway.extensions.channel_binding import _session_soul_names, _ensure_binding_loaded
-        from gateway.extensions.hall import hall_read
-
-        session_key = self._session_key_for_source(event.source)
-        _ensure_binding_loaded(session_key)
-        soul = _session_soul_names.get(session_key, "")
-
-        if not soul:
-            return "No soul bound to this channel. Use /bind first."
-
-        messages = hall_read(soul, mark_read=True)
-
-        if not messages:
-            return f"📭 No unread messages for '{soul}'."
-
-        lines = [f"📬 {len(messages)} unread message(s) for '{soul}':\n"]
-        for msg in messages:
-            lines.append(f"  From: {msg.get('from', '?')} | Subject: {msg.get('subject', '(none)')}")
-            lines.append(f"  {msg.get('body', '')[:200]}")
-            lines.append(f"  ID: {msg.get('id', '?')} | Time: {msg.get('ts', '?')}")
-            lines.append("")
-
-        return "\n".join(lines)
+        from gateway.extensions.hall import handle_hall_read
+        return await handle_hall_read(self, event)
 
     async def _handle_hall_status_command(self, event: MessageEvent) -> str:
         """Show status of all bound channel souls and their unread counts."""
-        from gateway.extensions.hall import hall_read
-        from gateway.extensions.channel_binding import _get_all_platform_bindings
-
-        all_bindings = _get_all_platform_bindings()
-        if not all_bindings:
-            return "No channel personality bindings configured."
-
-        lines = ["🏛️ **Hall Status — All Channels**\n"]
-
-        for platform_name, bindings_list in all_bindings.items():
-            if not isinstance(bindings_list, list):
-                continue
-            lines.append(f"**{platform_name.upper()}**:")
-            for entry in bindings_list:
-                if not isinstance(entry, dict):
-                    continue
-                soul = entry.get("soul", "?")
-                chan_id = entry.get("id", "?")
-                model = entry.get("model", "default")
-                scope = entry.get("memory_scope", "default")
-
-                # Count unread
-                try:
-                    unread = hall_read(soul, mark_read=False)
-                    unread_count = len(unread) if unread else 0
-                except Exception:
-                    unread_count = "?"
-
-                unread_icon = "🔴" if isinstance(unread_count, int) and unread_count > 0 else "🟢"
-                lines.append(
-                    f"  {unread_icon} {soul} (ch:{chan_id}, model:{model}, scope:{scope}) — {unread_count} unread"
-                )
-            lines.append("")
-
-        return "\n".join(lines)
+        from gateway.extensions.hall import handle_hall_status
+        return await handle_hall_status(self, event)
 
     async def _handle_hall_report_command(self, event: MessageEvent) -> str:
         """Send a status report from the current soul to its manager."""
-        from gateway.extensions.channel_binding import _session_soul_names, _ensure_binding_loaded
-        from gateway.extensions.hall import hall_send, hall_read
-
-        args = event.get_command_args().strip()
-        session_key = self._session_key_for_source(event.source)
-        _ensure_binding_loaded(session_key)
-        from_soul = _session_soul_names.get(session_key, "")
-
-        if not from_soul:
-            return "No soul bound to this channel. Use /bind first."
-
-        # Find manager soul: look for pm, alpha, manager, operation in bindings
-        from gateway.extensions.channel_binding import _get_all_platform_bindings
-        all_bindings = _get_all_platform_bindings()
-        manager_soul = None
-        manager_priority = ["pm", "alpha", "manager", "operation", "coordinator"]
-
-        for _platform, bindings_list in (all_bindings or {}).items():
-            if not isinstance(bindings_list, list):
-                continue
-            for entry in bindings_list:
-                if not isinstance(entry, dict):
-                    continue
-                soul_name = (entry.get("soul") or "").lower()
-                for candidate in manager_priority:
-                    if soul_name == candidate and soul_name != from_soul.lower():
-                        manager_soul = entry.get("soul")
-                        break
-                if manager_soul:
-                    break
-            if manager_soul:
-                break
-
-        if not manager_soul:
-            # Fallback: just send to "pm"
-            manager_soul = "pm"
-
-        # Build structured report
-        import datetime
-        now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-
-        # Check for any unread messages (pending tasks from manager)
-        unread = hall_read(from_soul, mark_read=False)
-        unread_count = len(unread) if unread else 0
-
-        subject = f"Status Report — {from_soul} @ {now}"
-        body_lines = [
-            f"**From:** {from_soul}",
-            f"**Time:** {now}",
-            f"**Pending Inbox:** {unread_count} unread message(s)",
-        ]
-        if args:
-            body_lines.append(f"**Status:** {args}")
-        else:
-            body_lines.append("**Status:** (no message provided — routine check-in)")
-        body = "\n".join(body_lines)
-
-        try:
-            entry = hall_send(from_soul=from_soul, to_soul=manager_soul, subject=subject, body=body, priority="normal", dispatch="queued")
-            return (
-                f"📋 Report sent!\n"
-                f"From: {from_soul} → To: {manager_soul}\n"
-                f"Subject: {subject}\n"
-                f"ID: {entry.get('id', '?')}"
-            )
-        except Exception as e:
-            return f"Failed to send report: {e}"
+        from gateway.extensions.hall import handle_hall_report
+        return await handle_hall_report(self, event)
 
     async def _handle_retry_command(self, event: MessageEvent) -> str:
         """Handle /retry command - re-send the last user message."""
