@@ -1238,11 +1238,14 @@ def _save_binding_to_config(platform: str, channel_id: str, binding: dict) -> st
     if not isinstance(bindings, list):
         bindings = []
 
-    # Build the binding entry to save — only id + soul.
-    # Model, provider, base_url, api_key, skills, memory_scope are all
-    # resolved from the soul's frontmatter at load time, so there is no
-    # need to duplicate them in config.yaml.
+    # Build the binding entry to save — id + soul + optional extras.
+    # memory_scope and skills are explicitly persisted for visibility
+    # and forward-compatibility; everything else (model, provider, etc.)
+    # is still resolved from the soul's frontmatter at load time.
     entry: Dict[str, Any] = {"id": channel_id, "soul": binding.get("soul")}
+    for extra_key in ("memory_scope", "skills"):
+        if extra_key in binding and binding[extra_key]:
+            entry[extra_key] = binding[extra_key]
 
     # Replace existing entry for same channel_id, or append
     replaced = False
@@ -1409,10 +1412,15 @@ async def handle_bind_command(session_store, event) -> str:
                 "First set a soul with `/bind <soul_name>`, then use `/bind save` to persist it."
             )
 
-        # Build the config entry: only id + soul needed.
-        # All other fields (model, provider, skills, memory_scope) are
-        # resolved from the soul's frontmatter at load time.
+        # Build the config entry: id + soul + memory_scope.
+        # memory_scope is explicitly persisted so config.yaml reflects the
+        # soul's frontmatter value — makes debugging / inspection easier
+        # and preserves scope even if the soul file is renamed or edited.
         entry: Dict[str, Any] = {"soul": current_soul}
+        if current_memory_scope:
+            entry["memory_scope"] = current_memory_scope
+        if current_skills:
+            entry["skills"] = current_skills
 
         error = _save_binding_to_config(platform, channel_id, entry)
         if error:
@@ -1422,9 +1430,16 @@ async def handle_bind_command(session_store, event) -> str:
         # via the side-channel (avoids modifying MessageEvent).
         set_bind_reset(channel_id)
 
+        _extras = []
+        if current_memory_scope:
+            _extras.append(f"scope: `{current_memory_scope}`")
+        if current_skills:
+            _extras.append(f"skills: {len(current_skills)}")
+        _extra_str = f" ({', '.join(_extras)})" if _extras else ""
+
         return (
             f"✅ Binding saved to config.yaml!\n"
-            f"Platform: `{platform}` | Channel: `{channel_id}` | Soul: `{current_soul}`\n"
+            f"Platform: `{platform}` | Channel: `{channel_id}` | Soul: `{current_soul}`{_extra_str}\n"
             f"🧹 Session cleared — fresh context for the new soul.\n"
             f"_(persists across gateway restarts)_"
         )

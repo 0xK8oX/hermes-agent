@@ -174,22 +174,17 @@ async def test_handle_bind_list():
 def test__expand_api_key_env_var_expansion():
     """_expand_api_key correctly expands ${VAR_NAME} from environment."""
     import os
-    from pathlib import Path
-    # Load the actual user's .env, not the test temp one
-    from hermes_cli.env_loader import load_hermes_dotenv
-    hermes_home = Path.home() / '.hermes'
-    load_hermes_dotenv(hermes_home=hermes_home)
-    
-    # Check if MINIMAX_API_KEY exists (skip test if not present)
-    if not os.environ.get('MINIMAX_API_KEY'):
-        pytest.skip("MINIMAX_API_KEY not set in environment, skipping expansion test")
-    
-    # Test that env var expansion works (this is what failed for 401 auth)
-    raw = "${MINIMAX_API_KEY}"
-    expanded = _expand_api_key(raw)
-    assert expanded is not None
-    assert expanded != "${MINIMAX_API_KEY}"  # expansion must happen
-    assert len(expanded) > 10  # should be a real API key
+
+    # Use a temporary env var so the test is self-contained
+    os.environ["_TEST_HERMES_EXPAND_KEY"] = "sk-test-expanded-value-12345"
+    try:
+        raw = "${_TEST_HERMES_EXPAND_KEY}"
+        expanded = _expand_api_key(raw)
+        assert expanded is not None
+        assert expanded != "${_TEST_HERMES_EXPAND_KEY}"  # expansion must happen
+        assert expanded == "sk-test-expanded-value-12345"
+    finally:
+        os.environ.pop("_TEST_HERMES_EXPAND_KEY", None)
 
 
 def test__expand_api_key_direct_key_no_expansion():
@@ -229,54 +224,104 @@ def test_set_bind_reset_and_consume():
 @pytest.mark.asyncio
 async def test_handle_bind_soul_includes_api_key_expansion():
     """When binding a soul with an env var api_key reference, it gets expanded.
-    
+
     This tests the end-to-end flow that failed with 401 authentication when
-    ${MINIMAX_API_KEY} wasn't expanded and the literal string was sent to API.
+    an env var reference wasn't expanded and the literal string was sent to API.
     """
     import os
-    # We need to patch get_hermes_home to point to the real ~/.hermes
+    import re
     from hermes_constants import get_hermes_home
     from hermes_cli.env_loader import load_hermes_dotenv
     real_hermes_home = Path.home() / '.hermes'
-    # Load the actual .env so os.environ has the keys for expansion
     load_hermes_dotenv(hermes_home=real_hermes_home)
-    
-    # alpha.md has api_key: ${MINIMAX_API_KEY} in frontmatter
-    # We need to verify that after binding, the api_key in the binding
-    # is actually expanded, not still the literal ${...}
+
+    # Read alpha.md frontmatter to discover the actual api_key env var reference
+    alpha_path = real_hermes_home / "souls" / "alpha.md"
+    if not alpha_path.exists():
+        pytest.skip("alpha.md not found in ~/.hermes/souls/, skipping")
+
+    frontmatter_text = alpha_path.read_text().split("---")[1] if "---" in alpha_path.read_text() else ""
+    m = re.search(r'^api_key:\s*(\S+)', frontmatter_text, re.MULTILINE)
+    if not m:
+        pytest.skip("alpha.md has no api_key in frontmatter, skipping")
+
+    raw_api_key = m.group(1)
+    env_var_match = re.match(r'^\$\{(.+)\}$', raw_api_key)
+    if not env_var_match:
+        pytest.skip("alpha.md api_key is not an env var reference, skipping")
+
+    env_var_name = env_var_match.group(1)
+    env_value = os.environ.get(env_var_name)
+    if not env_value:
+        pytest.skip(f"{env_var_name} not set in environment, skipping expansion verification")
+
     event = create_mock_event("alpha")
     session_store = Mock()
     session_entry = Mock()
     session_key = "agent:main:telegram:dm:123456"
     session_entry.session_key = session_key
     session_store.get_or_create_session = Mock(return_value=session_entry)
-    
-    # Before the test clear any existing binding
+
     with _state_lock:
         _session_bindings.pop(session_key, None)
         _session_model_overrides.pop(session_key, None)
-    
-    # Execute with patched get_hermes_home
+
     with patch('hermes_constants.get_hermes_home', return_value=real_hermes_home):
         result = await handle_bind_command(session_store, event)
-    
+
     if "not found" in result:
         pytest.skip("alpha.md not found in ~/.hermes/souls/, skipping")
-    
-    # Check the binding has the expanded API key in model overrides, not the literal
+
     with _state_lock:
         model_override = _session_model_overrides.get(session_key)
         assert model_override is not None
-        if "api_key" not in model_override:
-            pytest.skip("alpha.md has no api_key in frontmatter, skipping")
-        api_key = model_override["api_key"]
+        api_key = model_override.get("api_key")
         assert api_key is not None
-        # Skip if MINIMAX_API_KEY not set at all (test still passes logic)
-        if not os.environ.get('MINIMAX_API_KEY'):
-            pytest.skip("MINIMAX_API_KEY not set in environment, skipping expansion verification")
-        assert api_key != "${MINIMAX_API_KEY}"  # MUST be expanded
-        assert len(api_key) > 50  # MINIMAX_API_KEY is ~125 chars
-        # Should start with "sk-cp-" which is correct for MiniMax
-        assert api_key.startswith("sk-cp-")
-        # Should start with "sk-cp-" which is correct for MiniMax
-        assert api_key.startswith("sk-cp-")
+        assert api_key != raw_api_key  # MUST be expanded, not literal ${...}
+        assert api_key == env_value  # Should match the actual env var value
+
+
+@pytest.mark.asyncio
+async def test_handle_bind_save_persists_memory_scope():
+    """/bind save should write memory_scope and skills to config.yaml."""
+    from hermes_constants import get_hermes_home
+    real_hermes_home = Path.home() / '.hermes'
+
+    session_key = "agent:main:telegram:group:test-save-scope"
+    # Pre-populate runtime binding as if /bind delta was run
+    with _state_lock:
+        _session_bindings[session_key] = {"soul": "delta"}
+        _session_soul_names[session_key] = "delta"
+        _session_memory_scopes[session_key] = "delta"
+        _session_skills[session_key] = ["devops/shopilala-app"]
+
+    event = create_mock_event("save", session_key=session_key)
+    session_store = Mock()
+    session_entry = Mock()
+    session_entry.session_key = session_key
+    session_store.get_or_create_session = Mock(return_value=session_entry)
+
+    with patch('hermes_constants.get_hermes_home', return_value=real_hermes_home):
+        result = await handle_bind_command(session_store, event)
+
+    assert "Binding saved" in result
+    assert "scope: `delta`" in result
+
+    # Verify config.yaml was updated with memory_scope
+    import yaml
+    config_path = real_hermes_home / "config.yaml"
+    with open(config_path) as f:
+        config = yaml.safe_load(f)
+
+    tg_bindings = config.get("telegram", {}).get("extra", {}).get("channel_personality_bindings", [])
+    saved = next((b for b in tg_bindings if b.get("id") == "test-save-scope"), None)
+    assert saved is not None, "Binding not found in config.yaml"
+    assert saved.get("soul") == "delta"
+    assert saved.get("memory_scope") == "delta"
+    assert saved.get("skills") == ["devops/shopilala-app"]
+
+    # Clean up: remove test binding
+    tg_bindings = [b for b in tg_bindings if b.get("id") != "test-save-scope"]
+    config["telegram"]["extra"]["channel_personality_bindings"] = tg_bindings
+    with open(config_path, "w") as f:
+        yaml.dump(config, f, default_flow_style=False, sort_keys=False)

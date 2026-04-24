@@ -2023,7 +2023,7 @@ def _normalize_custom_provider_entry(
     _KNOWN_KEYS = {
         "name", "api", "url", "base_url", "api_key", "key_env",
         "api_mode", "transport", "model", "default_model", "models",
-        "context_length", "rate_limit_delay",
+        "context_length", "rate_limit_delay", "provider_key",
     }
     for camel, snake in _CAMEL_ALIASES.items():
         if camel in entry and snake not in entry:
@@ -2074,7 +2074,8 @@ def _normalize_custom_provider_entry(
         "base_url": base_url,
     }
 
-    provider_key = provider_key.strip()
+    # Use parameter if provided, otherwise fall back to entry dict
+    provider_key = (provider_key or str(entry.get("provider_key", "") or "")).strip()
     if provider_key:
         normalized["provider_key"] = provider_key
 
