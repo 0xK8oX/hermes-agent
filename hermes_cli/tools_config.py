@@ -830,6 +830,51 @@ def _prompt_toolset_checklist(platform_label: str, enabled: Set[str]) -> Set[str
     return {effective[i][0] for i in chosen}
 
 
+def _plugin_image_gen_providers() -> list[dict]:
+    """Build picker-row dicts from plugin-registered image gen providers.
+
+    Each returned dict looks like a regular ``TOOL_CATEGORIES`` provider
+    row but carries an ``image_gen_plugin_name`` marker so downstream
+    code (config writing, model picker) knows to route through the
+    plugin registry instead of the in-tree FAL backend.
+
+    FAL is skipped — it's already exposed by the hardcoded
+    ``TOOL_CATEGORIES["image_gen"]`` entries. When FAL gets ported to
+    a plugin in a follow-up PR, the hardcoded entries go away and this
+    function surfaces it alongside OpenAI automatically.
+    """
+    try:
+        from agent.image_gen_registry import list_providers
+        from hermes_cli.plugins import _ensure_plugins_discovered
+
+        _ensure_plugins_discovered()
+        providers = list_providers()
+    except Exception:
+        return []
+
+    rows: list[dict] = []
+    for provider in providers:
+        if getattr(provider, "name", None) == "fal":
+            # FAL has its own hardcoded rows today.
+            continue
+        try:
+            schema = provider.get_setup_schema()
+        except Exception:
+            continue
+        if not isinstance(schema, dict):
+            continue
+        rows.append(
+            {
+                "name": schema.get("name", provider.display_name),
+                "badge": schema.get("badge", ""),
+                "tag": schema.get("tag", ""),
+                "env_vars": schema.get("env_vars", []),
+                "image_gen_plugin_name": provider.name,
+            }
+        )
+    return rows
+
+
 # ─── Provider-Aware Configuration ────────────────────────────────────────────
 
 def _configure_toolset(ts_key: str, config: dict):

@@ -472,6 +472,17 @@ def _write_config_key(key_path: str, value):
     _save_cfg(cfg)
 
 
+_STATUSBAR_MODES = frozenset({"off", "top", "bottom"})
+
+
+def _coerce_statusbar(raw) -> str:
+    if raw is False:
+        return "off"
+    if isinstance(raw, str) and (s := raw.strip().lower()) in _STATUSBAR_MODES:
+        return s
+    return "top"
+
+
 def _load_reasoning_config() -> Optional[dict]:
     from hermes_constants import parse_reasoning_effort
 

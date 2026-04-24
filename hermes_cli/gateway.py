@@ -800,6 +800,126 @@ def _ensure_user_systemd_env() -> None:
             os.environ["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path={bus_path}"
 
 
+def _wait_for_user_dbus_socket(timeout: float = 3.0) -> bool:
+    """Poll for the user D-Bus socket to appear, up to ``timeout`` seconds.
+
+    Linger-enabled user@.service can take a second or two to spawn the socket
+    after ``loginctl enable-linger`` runs.  Returns True once the socket exists.
+    """
+    import time
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if _user_dbus_socket_path().exists():
+            _ensure_user_systemd_env()
+            return True
+        time.sleep(0.2)
+    return _user_dbus_socket_path().exists()
+
+
+def _preflight_user_systemd(*, auto_enable_linger: bool = True) -> None:
+    """Ensure ``systemctl --user`` will reach the user D-Bus session bus.
+
+    No-op when the bus socket is already there (the common case on desktops
+    and linger-enabled servers).  On fresh SSH sessions where the socket is
+    missing:
+
+    * If linger is already enabled, wait briefly for user@.service to spawn
+      the socket.
+    * If linger is disabled and ``auto_enable_linger`` is True, try
+      ``loginctl enable-linger $USER`` (works as non-root when polkit permits
+      it, otherwise needs sudo).
+    * If the socket is still missing afterwards, raise
+      :class:`UserSystemdUnavailableError` with a precise remediation message.
+
+    Callers should treat the exception as a terminal condition for user-scope
+    systemd operations and surface the message to the user.
+    """
+    _ensure_user_systemd_env()
+    bus_path = _user_dbus_socket_path()
+    if bus_path.exists():
+        return
+
+    import getpass
+
+    username = getpass.getuser()
+    linger_enabled, linger_detail = get_systemd_linger_status()
+
+    if linger_enabled is True:
+        if _wait_for_user_dbus_socket(timeout=3.0):
+            return
+        # Linger is on but socket still missing — unusual; fall through to error.
+        _raise_user_systemd_unavailable(
+            username,
+            reason="User D-Bus socket is missing even though linger is enabled.",
+            fix_hint=(
+                f"  systemctl start user@{os.getuid()}.service\n"
+                "  (may require sudo; try again after the command succeeds)"
+            ),
+        )
+
+    if auto_enable_linger and shutil.which("loginctl"):
+        try:
+            result = subprocess.run(
+                ["loginctl", "enable-linger", username],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=30,
+            )
+        except Exception as exc:
+            _raise_user_systemd_unavailable(
+                username,
+                reason=f"loginctl enable-linger failed ({exc}).",
+                fix_hint=f"  sudo loginctl enable-linger {username}",
+            )
+        else:
+            if result.returncode == 0:
+                if _wait_for_user_dbus_socket(timeout=5.0):
+                    print(f"✓ Enabled linger for {username} — user D-Bus now available")
+                    return
+                # enable-linger succeeded but the socket never appeared.
+                _raise_user_systemd_unavailable(
+                    username,
+                    reason="Linger was enabled, but the user D-Bus socket did not appear.",
+                    fix_hint=(
+                        "  Log out and log back in, then re-run the command.\n"
+                        f"  Or reboot and run: systemctl --user start {get_service_name()}"
+                    ),
+                )
+            detail = (result.stderr or result.stdout or f"exit {result.returncode}").strip()
+            _raise_user_systemd_unavailable(
+                username,
+                reason=f"loginctl enable-linger was denied: {detail}",
+                fix_hint=f"  sudo loginctl enable-linger {username}",
+            )
+
+    _raise_user_systemd_unavailable(
+        username,
+        reason=(
+            "User D-Bus session is not available "
+            f"({linger_detail or 'linger disabled'})."
+        ),
+        fix_hint=f"  sudo loginctl enable-linger {username}",
+    )
+
+
+def _raise_user_systemd_unavailable(username: str, *, reason: str, fix_hint: str) -> None:
+    """Build a user-facing error message and raise UserSystemdUnavailableError."""
+    msg = (
+        f"{reason}\n"
+        "  systemctl --user cannot reach the user D-Bus session in this shell.\n"
+        "\n"
+        "  To fix:\n"
+        f"{fix_hint}\n"
+        "\n"
+        "  Alternative: run the gateway in the foreground (stays up until\n"
+        "  you exit / close the terminal):\n"
+        "    hermes gateway run"
+    )
+    raise UserSystemdUnavailableError(msg)
+
+
 def _systemctl_cmd(system: bool = False) -> List[str]:
     if not system:
         _ensure_user_systemd_env()
