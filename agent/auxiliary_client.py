@@ -1504,6 +1504,15 @@ def _is_rate_limit_or_overload_error(exc: Exception) -> bool:
     return any(kw in err_lower for kw in rate_limit_kw)
 
 
+def _is_auth_error(exc: Exception) -> bool:
+    """Detect authentication errors (401) that warrant credential refresh."""
+    status = getattr(exc, "status_code", None)
+    if status == 401:
+        return True
+    err_lower = str(exc).lower()
+    return "error code: 401" in err_lower or "authenticationerror" in type(exc).__name__.lower()
+
+
 def _try_payment_fallback(
     failed_provider: str,
     task: str = None,
@@ -3017,6 +3026,32 @@ def call_llm(
                     raise
                 first_err = retry_err
 
+        # ── Nous 401 refresh: retry with fresh credentials before giving up ──
+        client_is_nous = (
+            resolved_provider == "nous"
+            or "nousresearch" in (_base_info or "")
+        )
+        if _is_auth_error(first_err) and client_is_nous:
+            refreshed_client, refreshed_model = _refresh_nous_auxiliary_client(
+                cache_provider=resolved_provider or "nous",
+                model=final_model,
+                async_mode=False,
+                base_url=resolved_base_url,
+                api_key=resolved_api_key,
+            )
+            if refreshed_client is not None:
+                logger.info(
+                    "Auxiliary %s: refreshed Nous runtime credentials after 401, retrying",
+                    task or "call")
+                _refreshed_base = str(getattr(refreshed_client, "base_url", "") or "")
+                refreshed_kwargs = _build_call_kwargs(
+                    resolved_provider, refreshed_model, messages,
+                    temperature=temperature, max_tokens=max_tokens,
+                    tools=tools, timeout=effective_timeout, extra_body=effective_extra_body,
+                    base_url=_refreshed_base or resolved_base_url)
+                return _validate_llm_response(
+                    refreshed_client.chat.completions.create(**refreshed_kwargs), task)
+
         # ── Provider fallback (payment, connection, rate-limit, or server overload) ──
         # When the resolved provider returns an error that warrants trying a
         # different backend, first try the user's configured fallback_providers
@@ -3241,6 +3276,32 @@ async def async_call_llm(
                 ):
                     raise
                 first_err = retry_err
+
+        # ── Nous 401 refresh: retry with fresh credentials before giving up ──
+        client_is_nous = (
+            resolved_provider == "nous"
+            or "nousresearch" in (_client_base or "")
+        )
+        if _is_auth_error(first_err) and client_is_nous:
+            refreshed_client, refreshed_model = _refresh_nous_auxiliary_client(
+                cache_provider=resolved_provider or "nous",
+                model=final_model,
+                async_mode=True,
+                base_url=resolved_base_url,
+                api_key=resolved_api_key,
+            )
+            if refreshed_client is not None:
+                logger.info(
+                    "Auxiliary %s (async): refreshed Nous runtime credentials after 401, retrying",
+                    task or "call")
+                _refreshed_base = str(getattr(refreshed_client, "base_url", "") or "")
+                refreshed_kwargs = _build_call_kwargs(
+                    resolved_provider, refreshed_model, messages,
+                    temperature=temperature, max_tokens=max_tokens,
+                    tools=tools, timeout=effective_timeout, extra_body=effective_extra_body,
+                    base_url=_refreshed_base or resolved_base_url)
+                return _validate_llm_response(
+                    await refreshed_client.chat.completions.create(**refreshed_kwargs), task)
 
         # ── Provider fallback (payment, connection, rate-limit, or server overload) ──
         should_fallback = (
