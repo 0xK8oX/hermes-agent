@@ -405,6 +405,38 @@ def gateway_help_lines() -> List[str]:
     return lines
 
 
+def _iter_plugin_command_entries() -> List[Tuple[str, str, str]]:
+    """Yield (name, description, args_hint) tuples for all plugin slash commands.
+
+    Plugin commands are registered via
+    :func:`hermes_cli.plugins.PluginContext.register_command`. They behave
+    like ``CommandDef`` entries for gateway surfacing: they appear in the
+    Telegram command menu, in Slack's ``/hermes`` subcommand mapping, and
+    (via :func:`gateway.platforms.discord._register_slash_commands`) in
+    Discord's native slash command picker.
+
+    Lookup is lazy so importing this module never forces plugin discovery
+    (which can trigger filesystem scans and environment-dependent
+    behavior).
+    """
+    try:
+        from hermes_cli.plugins import get_plugin_commands
+    except Exception:
+        return []
+    try:
+        commands = get_plugin_commands() or {}
+    except Exception:
+        return []
+    entries: List[Tuple[str, str, str]] = []
+    for name, meta in commands.items():
+        if not isinstance(name, str) or not isinstance(meta, dict):
+            continue
+        description = str(meta.get("description") or f"Run /{name}")
+        args_hint = str(meta.get("args_hint") or "").strip()
+        entries.append((name, description, args_hint))
+    return entries
+
+
 def telegram_bot_commands() -> List[Tuple[str, str]]:
     """Return (command_name, description) pairs for Telegram setMyCommands.
 
