@@ -1327,6 +1327,7 @@ def convert_messages_to_anthropic(
     # 3. Strip cache_control from thinking/redacted_thinking blocks —
     #    cache markers can interfere with signature validation.
     _THINKING_TYPES = frozenset(("thinking", "redacted_thinking"))
+    _is_kimi = _is_kimi_coding_endpoint(base_url)
     _is_third_party = _is_third_party_anthropic_endpoint(base_url)
     # Determine whether thinking will be enabled in the request.  Third-party
     # Anthropic-compatible endpoints (Zhipu GLM, MiniMax, etc.) require every
