@@ -6,7 +6,6 @@ from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 
 import pytest
-from typing import Tuple, List, Set
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -22,7 +21,7 @@ def _load_module(module_name: str, path: Path):
     return module
 
 
-def _reset_modules(prefixes: Tuple[str, ...]):
+def _reset_modules(prefixes: tuple[str, ...]):
     for name in list(sys.modules):
         if name.startswith(prefixes):
             sys.modules.pop(name, None)
@@ -55,7 +54,7 @@ def _restore_tool_modules():
 def _install_modal_test_modules(
     tmp_path: Path,
     *,
-    fail_on_snapshot_ids: Set[str] | None = None,
+    fail_on_snapshot_ids: set[str] | None = None,
     snapshot_id: str = "im-fresh",
 ):
     _reset_modules(("tools", "hermes_cli", "modal"))
@@ -129,9 +128,9 @@ def _install_modal_test_modules(
         iter_cache_files=lambda **kw: [],
     )
 
-    from_id_calls: List[str] = []
-    registry_calls: List[Tuple[str, list[str] | None]] = []
-    create_calls: List[dict] = []
+    from_id_calls: list[str] = []
+    registry_calls: list[tuple[str, list[str] | None]] = []
+    create_calls: list[dict] = []
 
     class _FakeImage:
         @staticmethod

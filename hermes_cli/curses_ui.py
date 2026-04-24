@@ -165,8 +165,8 @@ def curses_radiolist(
     items: List[str],
     selected: int = 0,
     *,
-    cancel_returns: Optional[int] = None,
-    description: Optional[str] = None,
+    cancel_returns: int | None = None,
+    description: str | None = None,
 ) -> int:
     """Curses single-select radio list. Returns the selected index.
 
@@ -185,7 +185,7 @@ def curses_radiolist(
     if not sys.stdin.isatty():
         return cancel_returns
 
-    desc_lines: List[str] = []
+    desc_lines: list[str] = []
     if description:
         desc_lines = description.splitlines()
 
@@ -314,7 +314,7 @@ def curses_single_select(
     default_index: int = 0,
     *,
     cancel_label: str = "Cancel",
-) -> Optional[int]:
+) -> int | None:
     """Curses single-select menu. Returns selected index or None on cancel.
 
     Works inside prompt_toolkit because curses.wrapper() restores the terminal
@@ -411,7 +411,7 @@ def _numbered_single_fallback(
     title: str,
     items: List[str],
     cancel_idx: int,
-) -> Optional[int]:
+) -> int | None:
     """Text-based numbered fallback for single-select."""
     print(f"\n  {title}\n")
     for i, label in enumerate(items, 1):

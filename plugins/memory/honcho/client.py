@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from hermes_constants import get_hermes_home
-from typing import Any, TYPE_CHECKING, Optional, List, Dict, Set
+from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from honcho import Honcho
@@ -94,7 +94,7 @@ def _resolve_bool(host_val, root_val, *, default: bool) -> bool:
     return default
 
 
-def _parse_context_tokens(host_val, root_val) -> Optional[int]:
+def _parse_context_tokens(host_val, root_val) -> int | None:
     """Parse contextTokens: host wins, then root, then None (uncapped)."""
     for val in (host_val, root_val):
         if val is not None:
@@ -119,7 +119,7 @@ def _parse_dialectic_depth(host_val, root_val) -> int:
 _VALID_REASONING_LEVELS = ("minimal", "low", "medium", "high", "max")
 
 
-def _parse_dialectic_depth_levels(host_val, root_val, depth: int) -> Optional[List[str]]:
+def _parse_dialectic_depth_levels(host_val, root_val, depth: int) -> list[str] | None:
     """Parse dialecticDepthLevels: optional array of reasoning levels per pass.
 
     Returns None when not configured (use proportional defaults).
@@ -138,7 +138,7 @@ def _parse_dialectic_depth_levels(host_val, root_val, depth: int) -> Optional[Li
     return None
 
 
-def _resolve_optional_float(*values: Any) -> Optional[float]:
+def _resolve_optional_float(*values: Any) -> float | None:
     """Return the first non-empty value coerced to a positive float."""
     for value in values:
         if value is None:
@@ -182,7 +182,7 @@ _OBSERVATION_PRESETS = {
 
 def _resolve_observation(
     mode: str,
-    observation_obj: Optional[dict],
+    observation_obj: dict | None,
 ) -> dict:
     """Resolve per-peer observation booleans.
 
@@ -201,10 +201,10 @@ def _resolve_observation(
     ai_block = observation_obj.get("ai") or {}
 
     return {
-        "user_observe_me": user_block.get("observeMe", preSet["user_observe_me"]),
-        "user_observe_others": user_block.get("observeOthers", preSet["user_observe_others"]),
-        "ai_observe_me": ai_block.get("observeMe", preSet["ai_observe_me"]),
-        "ai_observe_others": ai_block.get("observeOthers", preSet["ai_observe_others"]),
+        "user_observe_me": user_block.get("observeMe", preset["user_observe_me"]),
+        "user_observe_others": user_block.get("observeOthers", preset["user_observe_others"]),
+        "ai_observe_me": ai_block.get("observeMe", preset["ai_observe_me"]),
+        "ai_observe_others": ai_block.get("observeOthers", preset["ai_observe_others"]),
     }
 
 
@@ -217,14 +217,14 @@ class HonchoClientConfig:
 
     host: str = HOST
     workspace_id: str = "hermes"
-    api_key: Optional[str] = None
+    api_key: str | None = None
     environment: str = "production"
     # Optional base URL for self-hosted Honcho (overrides environment mapping)
-    base_url: Optional[str] = None
+    base_url: str | None = None
     # Optional request timeout in seconds for Honcho SDK HTTP calls
-    timeout: Optional[float] = None
+    timeout: float | None = None
     # Identity
-    peer_name: Optional[str] = None
+    peer_name: str | None = None
     ai_peer: str = "hermes"
     # Toggles
     enabled: bool = False
@@ -233,7 +233,7 @@ class HonchoClientConfig:
     # "session" (flush on session end), or int (every N turns)
     write_frequency: str | int = "async"
     # Prefetch budget (None = no cap; set to an integer to bound auto-injected context)
-    context_tokens: Optional[int] = None
+    context_tokens: int | None = None
     # Dialectic (peer.chat) settings
     # reasoning_level: "minimal" | "low" | "medium" | "high" | "max"
     dialectic_reasoning_level: str = "low"
@@ -250,7 +250,7 @@ class HonchoClientConfig:
     # Optional per-pass reasoning level override. Array of reasoning levels
     # matching dialectic_depth length. When None, uses proportional defaults
     # derived from dialectic_reasoning_level.
-    dialectic_depth_levels: Optional[List[str]] = None
+    dialectic_depth_levels: list[str] | None = None
     # When true, the auto-injected dialectic scales reasoning level up on
     # longer queries. See HonchoMemoryProvider for thresholds.
     reasoning_heuristic: bool = True
@@ -281,9 +281,9 @@ class HonchoClientConfig:
     # Session resolution
     session_strategy: str = "per-directory"
     session_peer_prefix: bool = False
-    sessions: Dict[str, str] = field(default_factory=dict)
+    sessions: dict[str, str] = field(default_factory=dict)
     # Raw global config for anything else consumers need
-    raw: Dict[str, Any] = field(default_factory=dict)
+    raw: dict[str, Any] = field(default_factory=dict)
     # True when Honcho was explicitly configured for this host (hosts.hermes
     # block exists or enabled was set explicitly), vs auto-enabled from a
     # stray HONCHO_API_KEY env var.
@@ -293,7 +293,7 @@ class HonchoClientConfig:
     def from_env(
         cls,
         workspace_id: str = "hermes",
-        host: Optional[str] = None,
+        host: str | None = None,
     ) -> HonchoClientConfig:
         """Create config from environment variables (fallback)."""
         resolved_host = host or resolve_active_host()
@@ -314,7 +314,7 @@ class HonchoClientConfig:
     @classmethod
     def from_global_config(
         cls,
-        host: Optional[str] = None,
+        host: str | None = None,
         config_path: Path | None = None,
     ) -> HonchoClientConfig:
         """Create config from the resolved Honcho config path.
@@ -507,7 +507,7 @@ class HonchoClientConfig:
         )
 
     @staticmethod
-    def _git_repo_name(cwd: str) -> Optional[str]:
+    def _git_repo_name(cwd: str) -> str | None:
         """Return the git repo root directory name, or None if not in a repo."""
         import subprocess
 
@@ -524,11 +524,11 @@ class HonchoClientConfig:
 
     def resolve_session_name(
         self,
-        cwd: Optional[str] = None,
-        session_title: Optional[str] = None,
-        session_id: Optional[str] = None,
-        gateway_session_key: Optional[str] = None,
-    ) -> Optional[str]:
+        cwd: str | None = None,
+        session_title: str | None = None,
+        session_id: str | None = None,
+        gateway_session_key: str | None = None,
+    ) -> str | None:
         """Resolve Honcho session name.
 
         Resolution order:

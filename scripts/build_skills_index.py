@@ -43,7 +43,6 @@ from tools.skills_hub import (
     SkillMeta,
 )
 import httpx
-from typing import List, Dict
 
 OUTPUT_PATH = os.path.join(REPO_ROOT, "website", "static", "api", "skills-index.json")
 INDEX_VERSION = 1
@@ -93,7 +92,7 @@ def crawl_skills_sh(source: SkillsShSource) -> list:
         "kubernetes", "terraform", "rust", "go", "java",
     ]
 
-    all_skills: Dict[str, dict] = {}
+    all_skills: dict[str, dict] = {}
     for query in queries:
         try:
             results = source.search(query, limit=50)
@@ -157,7 +156,7 @@ def batch_resolve_paths(skills: list, auth: GitHubAuth) -> list:
     start = time.time()
 
     # Group by repo
-    by_repo: Dict[str, list] = defaultdict(list)
+    by_repo: dict[str, list] = defaultdict(list)
     for s in skills_sh:
         repo = s.get("repo", "")
         if repo:
@@ -263,7 +262,7 @@ def main():
         "lobehub": LobeHubSource(),
     }
 
-    all_skills: List[dict] = []
+    all_skills: list[dict] = []
 
     # Crawl skills.sh
     all_skills.extend(crawl_skills_sh(skills_sh_source))
@@ -283,7 +282,7 @@ def main():
     all_skills = batch_resolve_paths(all_skills, auth)
 
     # Deduplicate by identifier
-    seen: Dict[str, dict] = {}
+    seen: dict[str, dict] = {}
     for skill in all_skills:
         key = skill["identifier"]
         if key not in seen:

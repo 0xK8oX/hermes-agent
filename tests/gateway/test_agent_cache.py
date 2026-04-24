@@ -15,7 +15,6 @@ import threading
 from unittest.mock import MagicMock, patch
 
 import pytest
-from typing import Optional
 
 
 def _make_runner():
@@ -274,7 +273,7 @@ class TestAgentCacheBoundedGrowth:
         runner._agent_cache_lock = threading.Lock()
         return runner
 
-    def _fake_agent(self, last_activity: Optional[float] = None):
+    def _fake_agent(self, last_activity: float | None = None):
         """Lightweight stand-in; real AIAgent is heavy to construct."""
         m = MagicMock()
         if last_activity is not None:

@@ -7,7 +7,6 @@ from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 
 import pytest
-from typing import Tuple
 
 
 TOOLS_DIR = Path(__file__).resolve().parents[2] / "tools"
@@ -22,7 +21,7 @@ def _load_tool_module(module_name: str, filename: str):
     return module
 
 
-def _reset_modules(prefixes: Tuple[str, ...]):
+def _reset_modules(prefixes: tuple[str, ...]):
     for name in list(sys.modules):
         if name.startswith(prefixes):
             sys.modules.pop(name, None)

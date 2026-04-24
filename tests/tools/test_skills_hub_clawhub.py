@@ -4,7 +4,6 @@ import unittest
 from unittest.mock import patch
 
 from tools.skills_hub import ClawHubSource, SkillMeta
-from typing import List
 
 
 class _MockResponse:
@@ -57,7 +56,7 @@ class TestClawHubSource(unittest.TestCase):
         self.assertEqual(results[0].description, "Calendar integration")
 
         self.assertGreaterEqual(mock_get.call_count, 2)
-        args, kwargs = mock_get.call_args_List[0]
+        args, kwargs = mock_get.call_args_list[0]
         self.assertTrue(args[0].endswith("/skills"))
         self.assertEqual(kwargs["params"], {"search": "caldav", "limit": 5})
 

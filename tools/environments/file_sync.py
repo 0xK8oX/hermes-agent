@@ -22,7 +22,7 @@ try:
 except ImportError:
     fcntl = None  # Windows — file locking skipped
 from pathlib import Path
-from typing import Callable, Optional, Tuple, List, Dict
+from typing import Callable
 
 from hermes_constants import get_hermes_home
 from tools.environments.base import _file_mtime_key
@@ -34,13 +34,13 @@ _FORCE_SYNC_ENV = "HERMES_FORCE_FILE_SYNC"
 
 # Transport callbacks provided by each backend
 UploadFn = Callable[[str, str], None]  # (host_path, remote_path) -> raises on failure
-BulkUploadFn = Callable[[List[Tuple[str, str]]], None]  # [(host_path, remote_path), ...] -> raises on failure
+BulkUploadFn = Callable[[list[tuple[str, str]]], None]  # [(host_path, remote_path), ...] -> raises on failure
 BulkDownloadFn = Callable[[Path], None]  # (dest_tar_path) -> writes tar archive, raises on failure
-DeleteFn = Callable[[List[str]], None]  # (remote_paths) -> raises on failure
-GetFilesFn = Callable[[], List[Tuple[str, str]]]  # () -> [(host_path, remote_path), ...]
+DeleteFn = Callable[[list[str]], None]  # (remote_paths) -> raises on failure
+GetFilesFn = Callable[[], list[tuple[str, str]]]  # () -> [(host_path, remote_path), ...]
 
 
-def iter_sync_files(container_base: str = "/root/.hermes") -> List[Tuple[str, str]]:
+def iter_sync_files(container_base: str = "/root/.hermes") -> list[tuple[str, str]]:
     """Enumerate all files that should be synced to a remote environment.
 
     Combines credentials, skills, and cache into a single flat list of
@@ -56,7 +56,7 @@ def iter_sync_files(container_base: str = "/root/.hermes") -> List[Tuple[str, st
         iter_skills_files,
     )
 
-    files: List[Tuple[str, str]] = []
+    files: list[tuple[str, str]] = []
     for entry in get_credential_file_mounts():
         remote = entry["container_path"].replace(
             "/root/.hermes", container_base, 1
@@ -69,17 +69,17 @@ def iter_sync_files(container_base: str = "/root/.hermes") -> List[Tuple[str, st
     return files
 
 
-def quoted_rm_command(remote_paths: List[str]) -> str:
+def quoted_rm_command(remote_paths: list[str]) -> str:
     """Build a shell ``rm -f`` command for a batch of remote paths."""
     return "rm -f " + " ".join(shlex.quote(p) for p in remote_paths)
 
 
-def quoted_mkdir_command(dirs: List[str]) -> str:
+def quoted_mkdir_command(dirs: list[str]) -> str:
     """Build a shell ``mkdir -p`` command for a batch of directories."""
     return "mkdir -p " + " ".join(shlex.quote(d) for d in dirs)
 
 
-def unique_parent_dirs(files: List[Tuple[str, str]]) -> List[str]:
+def unique_parent_dirs(files: list[tuple[str, str]]) -> list[str]:
     """Extract sorted unique parent directories from (host, remote) pairs."""
     return sorted({str(Path(remote).parent) for _, remote in files})
 
@@ -123,8 +123,8 @@ class FileSyncManager:
         self._bulk_upload_fn = bulk_upload_fn
         self._bulk_download_fn = bulk_download_fn
         self._delete_fn = delete_fn
-        self._synced_files: Dict[str, Tuple[float, int]] = {}  # remote_path -> (mtime, size)
-        self._pushed_hashes: Dict[str, str] = {}  # remote_path -> sha256 hex digest
+        self._synced_files: dict[str, tuple[float, int]] = {}  # remote_path -> (mtime, size)
+        self._pushed_hashes: dict[str, str] = {}  # remote_path -> sha256 hex digest
         self._last_sync_time: float = 0.0  # monotonic; 0 ensures first sync runs
         self._sync_interval = sync_interval
 
@@ -146,7 +146,7 @@ class FileSyncManager:
         current_remote_paths = {remote for _, remote in current_files}
 
         # --- Uploads: new or changed files ---
-        to_upload: List[Tuple[str, str]] = []
+        to_upload: list[tuple[str, str]] = []
         new_files = dict(self._synced_files)
         for host_path, remote_path in current_files:
             file_key = _file_mtime_key(host_path)
@@ -254,7 +254,7 @@ class FileSyncManager:
         # deferral there rather than crashing.
         on_main_thread = threading.current_thread() is threading.main_thread()
 
-        deferred_sigint: List[object] = []
+        deferred_sigint: list[object] = []
         original_handler = None
         if on_main_thread:
             original_handler = signal.getsignal(signal.SIGINT)
@@ -365,7 +365,7 @@ class FileSyncManager:
                     logger.debug("sync_back: no remote changes detected")
 
     def _resolve_host_path(self, remote_path: str,
-                           file_mapping: List[Tuple[str, str]] | None = None) -> Optional[str]:
+                           file_mapping: list[tuple[str, str]] | None = None) -> str | None:
         """Find the host path for a known remote path from the file mapping."""
         mapping = file_mapping if file_mapping is not None else []
         for host, remote in mapping:
@@ -374,7 +374,7 @@ class FileSyncManager:
         return None
 
     def _infer_host_path(self, remote_path: str,
-                         file_mapping: List[Tuple[str, str]] | None = None) -> Optional[str]:
+                         file_mapping: list[tuple[str, str]] | None = None) -> str | None:
         """Infer a host path for a new remote file by matching path prefixes.
 
         Uses the existing file mapping to find a remote->host directory

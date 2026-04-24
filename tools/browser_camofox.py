@@ -118,7 +118,7 @@ def _managed_persistence_enabled() -> bool:
 # ---------------------------------------------------------------------------
 # Session management
 # ---------------------------------------------------------------------------
-# Maps task_id -> {"user_id": str, "tab_id": Optional[str]}
+# Maps task_id -> {"user_id": str, "tab_id": str|None}
 _sessions: Dict[str, Dict[str, Any]] = {}
 _sessions_lock = threading.Lock()
 

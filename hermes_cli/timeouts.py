@@ -1,8 +1,7 @@
 from __future__ import annotations
-from typing import Optional, Dict
 
 
-def _coerce_timeout(raw: object) -> Optional[float]:
+def _coerce_timeout(raw: object) -> float | None:
     try:
         timeout = float(raw)
     except (TypeError, ValueError):
@@ -13,8 +12,8 @@ def _coerce_timeout(raw: object) -> Optional[float]:
 
 
 def get_provider_request_timeout(
-    provider_id: str, model: Optional[str] = None
-) -> Optional[float]:
+    provider_id: str, model: str | None = None
+) -> float | None:
     """Return a configured provider request timeout in seconds, if any."""
     if not provider_id:
         return None
@@ -42,8 +41,8 @@ def get_provider_request_timeout(
 
 
 def get_provider_stale_timeout(
-    provider_id: str, model: Optional[str] = None
-) -> Optional[float]:
+    provider_id: str, model: str | None = None
+) -> float | None:
     """Return a configured non-stream stale timeout in seconds, if any."""
     if not provider_id:
         return None
@@ -71,8 +70,8 @@ def get_provider_stale_timeout(
 
 
 def _get_model_config(
-    provider_config: Dict[str, object], model: Optional[str]
-) -> Dict[str, object] | None:
+    provider_config: dict[str, object], model: str | None
+) -> dict[str, object] | None:
     if not model:
         return None
 

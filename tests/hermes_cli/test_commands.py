@@ -1,7 +1,5 @@
 """Tests for the central command registry and autocomplete."""
 
-from typing import Optional
-
 from prompt_toolkit.completion import CompleteEvent
 from prompt_toolkit.document import Document
 
@@ -521,7 +519,7 @@ class TestSubcommandCompletion:
 # ── Ghost text (SlashCommandAutoSuggest) ────────────────────────────────
 
 
-def _suggestion(text: str, completer=None) -> Optional[str]:
+def _suggestion(text: str, completer=None) -> str | None:
     """Get ghost text suggestion for given input."""
     suggest = SlashCommandAutoSuggest(completer=completer)
     doc = Document(text=text)
@@ -1066,7 +1064,6 @@ class TestDiscordSkillCommands:
 # ---------------------------------------------------------------------------
 
 from hermes_cli.commands import discord_skill_commands_by_category  # noqa: E402
-from typing import Optional
 
 
 class TestDiscordSkillCommandsByCategory:

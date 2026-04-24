@@ -29,7 +29,6 @@ the bridge forwards responses correctly into the inner SDK generator.
 from __future__ import annotations
 
 import pytest
-from typing import Optional, Tuple
 
 
 pytest.importorskip("mcp.client.auth.oauth2", reason="MCP SDK 1.26.0+ required")
@@ -204,7 +203,7 @@ async def _noop_redirect(_url: str) -> None:
     return None
 
 
-async def _noop_callback() -> Tuple[str, Optional[str]]:
+async def _noop_callback() -> tuple[str, str | None]:
     """Callback handler that won't be invoked in these tests."""
     raise AssertionError(
         "callback handler should not be invoked in bidirectional-generator tests"

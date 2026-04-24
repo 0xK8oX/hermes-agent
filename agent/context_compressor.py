@@ -22,7 +22,7 @@ import json
 import logging
 import re
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from agent.auxiliary_client import call_llm
 from agent.context_engine import ContextEngine
@@ -329,7 +329,7 @@ class ContextCompressor(ContextEngine):
         summary_model_override: str = None,
         base_url: str = "",
         api_key: str = "",
-        config_context_length: Optional[int] = None,
+        config_context_length: int | None = None,
         provider: str = "",
         api_mode: str = "",
     ):
@@ -423,8 +423,8 @@ class ContextCompressor(ContextEngine):
 
     def _prune_old_tool_results(
         self, messages: List[Dict[str, Any]], protect_tail_count: int,
-        protect_tail_tokens: Optional[int] = None,
-    ) -> Tuple[List[Dict[str, Any]], int]:
+        protect_tail_tokens: int | None = None,
+    ) -> tuple[List[Dict[str, Any]], int]:
         """Replace old tool result contents with informative 1-line summaries.
 
         Instead of a generic placeholder, generates a summary like::
@@ -1038,7 +1038,7 @@ The user has requested that this compaction PRIORITISE preserving all informatio
 
     def _find_tail_cut_by_tokens(
         self, messages: List[Dict[str, Any]], head_end: int,
-        token_budget: Optional[int] = None,
+        token_budget: int | None = None,
     ) -> int:
         """Walk backward from the end of messages, accumulating tokens until
         the budget is reached. Returns the index where the tail starts.

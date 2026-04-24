@@ -24,7 +24,7 @@ import logging
 import os
 from contextvars import ContextVar
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List
 
 logger = logging.getLogger(__name__)
 
@@ -200,7 +200,7 @@ def get_credential_file_mounts() -> List[Dict[str, str]]:
 
 def get_skills_directory_mount(
     container_base: str = "/root/.hermes",
-) -> List[Dict[str, str]]:
+) -> list[Dict[str, str]]:
     """Return mount info for all skill directories (local + external).
 
     Skills may include ``scripts/``, ``templates/``, and ``references/``
@@ -341,7 +341,7 @@ def iter_skills_files(
 
 # The four cache subdirectories that should be mirrored into remote backends.
 # Each tuple is (new_subpath, old_name) matching hermes_constants.get_hermes_dir().
-_CACHE_DIRS: List[Tuple[str, str]] = [
+_CACHE_DIRS: list[tuple[str, str]] = [
     ("cache/documents", "document_cache"),
     ("cache/images", "image_cache"),
     ("cache/audio", "audio_cache"),

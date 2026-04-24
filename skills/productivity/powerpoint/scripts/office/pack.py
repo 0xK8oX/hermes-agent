@@ -20,15 +20,14 @@ from pathlib import Path
 import defusedxml.minidom
 
 from validators import DOCXSchemaValidator, PPTXSchemaValidator, RedliningValidator
-from typing import Optional, Tuple
 
 def pack(
     input_directory: str,
     output_file: str,
-    original_file: Optional[str] = None,
+    original_file: str | None = None,
     validate: bool = True,
     infer_author_func=None,
-) -> Tuple[None, str]:
+) -> tuple[None, str]:
     input_dir = Path(input_directory)
     output_path = Path(output_file)
     suffix = output_path.suffix.lower()
@@ -72,7 +71,7 @@ def _run_validation(
     original_file: Path,
     suffix: str,
     infer_author_func=None,
-) -> Tuple[bool, Optional[str]]:
+) -> tuple[bool, str | None]:
     output_lines = []
     validators = []
 

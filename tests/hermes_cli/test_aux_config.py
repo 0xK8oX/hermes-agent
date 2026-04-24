@@ -15,8 +15,6 @@ from __future__ import annotations
 import pytest
 
 from hermes_cli.config import DEFAULT_CONFIG, load_config
-from typing import List
-
 from hermes_cli.main import (
     _AUX_TASKS,
     _format_aux_current,
@@ -284,7 +282,7 @@ def test_leave_unchanged_replaces_cancel_label(tmp_path, monkeypatch):
 
     from hermes_cli import main as main_mod
 
-    captured: List[list[str]] = []
+    captured: list[list[str]] = []
 
     def fake_prompt(choices, *, default=0):
         captured.append(list(choices))

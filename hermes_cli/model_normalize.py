@@ -25,7 +25,7 @@ Inspired by Clawdbot's ``normalizeAnthropicModelId`` pattern.
 
 from __future__ import annotations
 
-from typing import Optional, Dict, Set
+from typing import Optional
 
 # ---------------------------------------------------------------------------
 # Vendor prefix mapping
@@ -36,7 +36,7 @@ from typing import Optional, Dict, Set
 # Example: "claude-sonnet-4.6" -> first token "claude" -> vendor "anthropic"
 #          -> aggregator slug: "anthropic/claude-sonnet-4.6"
 
-_VENDOR_PREFIXES: Dict[str, str] = {
+_VENDOR_PREFIXES: dict[str, str] = {
     "claude": "anthropic",
     "gpt": "openai",
     "o1": "openai",

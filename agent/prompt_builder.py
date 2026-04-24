@@ -13,7 +13,7 @@ from collections import OrderedDict
 from pathlib import Path
 
 from hermes_constants import get_hermes_home, get_skills_dir, is_wsl
-from typing import Optional, Tuple, List, Dict, Set
+from typing import Optional
 
 from agent.skill_utils import (
     extract_skill_conditions,
@@ -448,7 +448,7 @@ def build_environment_hints() -> str:
     Detects WSL, and can be extended for Termux, Docker, etc.
     Returns an empty string when no special environment is detected.
     """
-    hints: List[str] = []
+    hints: list[str] = []
     if is_wsl():
         hints.append(WSL_ENVIRONMENT_HINT)
     return "\n\n".join(hints)
@@ -484,9 +484,9 @@ def clear_skills_system_prompt_cache(*, clear_snapshot: bool = False) -> None:
             logger.debug("Could not remove skills prompt snapshot: %s", e)
 
 
-def _build_skills_manifest(skills_dir: Path) -> Dict[str, List[int]]:
+def _build_skills_manifest(skills_dir: Path) -> dict[str, list[int]]:
     """Build an mtime/size manifest of all SKILL.md and DESCRIPTION.md files."""
-    manifest: Dict[str, List[int]] = {}
+    manifest: dict[str, list[int]] = {}
     for filename in ("SKILL.md", "DESCRIPTION.md"):
         for path in iter_skill_index_files(skills_dir, filename):
             try:
@@ -517,9 +517,9 @@ def _load_skills_snapshot(skills_dir: Path) -> Optional[dict]:
 
 def _write_skills_snapshot(
     skills_dir: Path,
-    manifest: Dict[str, List[int]],
-    skill_entries: List[dict],
-    category_descriptions: Dict[str, str],
+    manifest: dict[str, list[int]],
+    skill_entries: list[dict],
+    category_descriptions: dict[str, str],
 ) -> None:
     """Persist skill metadata to disk for fast cold-start reuse."""
     payload = {
@@ -568,7 +568,7 @@ def _build_snapshot_entry(
 # Skills index
 # =========================================================================
 
-def _parse_skill_file(skill_file: Path) -> Tuple[bool, dict, str]:
+def _parse_skill_file(skill_file: Path) -> tuple[bool, dict, str]:
     """Read a SKILL.md once and return platform compatibility, frontmatter, and description.
 
     Returns (is_compatible, frontmatter, description). On any error, returns
@@ -589,8 +589,8 @@ def _parse_skill_file(skill_file: Path) -> Tuple[bool, dict, str]:
 
 def _skill_should_show(
     conditions: dict,
-    available_tools: "Set[str] | None",
-    available_toolsets: "Set[str] | None",
+    available_tools: "set[str] | None",
+    available_toolsets: "set[str] | None",
 ) -> bool:
     """Return False if the skill's conditional activation rules exclude it."""
     if available_tools is None and available_toolsets is None:
@@ -619,8 +619,8 @@ def _skill_should_show(
 
 
 def build_skills_system_prompt(
-    available_tools: "Set[str] | None" = None,
-    available_toolsets: "Set[str] | None" = None,
+    available_tools: "set[str] | None" = None,
+    available_toolsets: "set[str] | None" = None,
 ) -> str:
     """Build a compact skill index for the system prompt.
 
@@ -669,8 +669,8 @@ def build_skills_system_prompt(
     # ── Layer 2: disk snapshot ────────────────────────────────────────
     snapshot = _load_skills_snapshot(skills_dir)
 
-    skills_by_category: Dict[str, List[Tuple[str, str]]] = {}
-    category_descriptions: Dict[str, str] = {}
+    skills_by_category: dict[str, list[tuple[str, str]]] = {}
+    category_descriptions: dict[str, str] = {}
 
     if snapshot is not None:
         # Fast path: use pre-parsed metadata from disk
@@ -700,7 +700,7 @@ def build_skills_system_prompt(
         }
     else:
         # Cold path: full filesystem scan + write snapshot for next time
-        skill_entries: List[dict] = []
+        skill_entries: list[dict] = []
         for skill_file in iter_skill_index_files(skills_dir, "SKILL.md"):
             is_compatible, frontmatter, desc = _parse_skill_file(skill_file)
             entry = _build_snapshot_entry(skill_file, skills_dir, frontmatter, desc)
@@ -745,7 +745,7 @@ def build_skills_system_prompt(
     # Scan external dirs directly (no snapshot caching — they're read-only
     # and typically small).  Local skills already in skills_by_category take
     # precedence: we track seen names and skip duplicates from external dirs.
-    seen_skill_names: Set[str] = set()
+    seen_skill_names: set[str] = set()
     for cat_skills in skills_by_category.values():
         for name, _desc in cat_skills:
             seen_skill_names.add(name)
@@ -847,7 +847,7 @@ def build_skills_system_prompt(
     return result
 
 
-def build_nous_subscription_prompt(valid_tool_names: "Set[str] | None" = None) -> str:
+def build_nous_subscription_prompt(valid_tool_names: "set[str] | None" = None) -> str:
     """Build a compact Nous subscription capability block for the system prompt."""
     try:
         from hermes_cli.nous_subscription import get_nous_subscription_features

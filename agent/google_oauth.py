@@ -58,7 +58,7 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple, List
+from typing import Any, Dict, Optional, Tuple
 
 from hermes_constants import get_hermes_home
 
@@ -268,7 +268,7 @@ def _locate_gemini_cli_oauth_js() -> Optional[Path]:
         return None
 
     # Walk up from the binary to find npm install root
-    search_dirs: List[Path] = []
+    search_dirs: list[Path] = []
     cur = real.parent
     for _ in range(8):  # don't walk too far
         search_dirs.append(cur)

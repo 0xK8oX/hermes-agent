@@ -22,7 +22,6 @@ import run_agent
 from run_agent import AIAgent
 from agent.error_classifier import FailoverReason
 from agent.prompt_builder import DEFAULT_AGENT_IDENTITY
-from typing import List
 
 
 # ---------------------------------------------------------------------------
@@ -2586,7 +2585,7 @@ class TestRunConversation:
         assert result["api_calls"] == 2
         assert result["final_response"] == "Part 1 Part 2"
 
-        second_call_messages = agent.client.chat.completions.create.call_args_List[1].kwargs["messages"]
+        second_call_messages = agent.client.chat.completions.create.call_args_list[1].kwargs["messages"]
         assert second_call_messages[-1]["role"] == "user"
         assert "truncated by the output length limit" in second_call_messages[-1]["content"]
 
@@ -2631,7 +2630,7 @@ class TestRunConversation:
             == "Based on the search results, the best next step is to update the config."
         )
 
-        third_call_messages = agent.client.chat.completions.create.call_args_List[2].kwargs["messages"]
+        third_call_messages = agent.client.chat.completions.create.call_args_list[2].kwargs["messages"]
         assert third_call_messages[-1]["role"] == "user"
         assert "truncated by the output length limit" in third_call_messages[-1]["content"]
 
@@ -4279,7 +4278,7 @@ class TestPersistUserMessageOverride:
         assert messages[0]["content"] == "Hello there"
         saved_messages = mock_save.call_args.args[0]
         assert saved_messages[0]["content"] == "Hello there"
-        first_db_write = agent._session_db.append_message.call_args_List[0].kwargs
+        first_db_write = agent._session_db.append_message.call_args_list[0].kwargs
         assert first_db_write["content"] == "Hello there"
 
 

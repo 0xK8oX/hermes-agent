@@ -5,7 +5,6 @@ from gateway.config import GatewayConfig, Platform, PlatformConfig
 from gateway.platforms.base import BasePlatformAdapter
 from gateway.run import GatewayRunner
 from gateway.status import read_runtime_status
-from typing import List
 
 
 class _RetryableFailureAdapter(BasePlatformAdapter):
@@ -226,7 +225,7 @@ async def test_start_gateway_replace_writes_takeover_marker_before_sigterm(
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
 
     # Record the ORDER of marker-write + terminate_pid calls
-    events: List[str] = []
+    events: list[str] = []
     marker_paths_seen: list = []
 
     def record_write_marker(target_pid: int) -> bool:

@@ -6,7 +6,6 @@ without risk of circular imports.
 
 import os
 from pathlib import Path
-from typing import Optional
 
 
 def get_hermes_home() -> Path:
@@ -58,7 +57,7 @@ def get_default_hermes_root() -> Path:
     return env_path
 
 
-def get_optional_skills_dir(default: Optional[Path] = None) -> Path:
+def get_optional_skills_dir(default: Path | None = None) -> Path:
     """Return the optional-skills directory, honoring package-manager wrappers.
 
     Packaged installs may ship ``optional-skills`` outside the Python package
@@ -113,7 +112,7 @@ def display_hermes_home() -> str:
         return str(home)
 
 
-def get_subprocess_home() -> Optional[str]:
+def get_subprocess_home() -> str | None:
     """Return a per-profile HOME directory for subprocesses, or None.
 
     When ``{HERMES_HOME}/home/`` exists on disk, subprocesses should use it
@@ -142,7 +141,7 @@ def get_subprocess_home() -> Optional[str]:
 VALID_REASONING_EFFORTS = ("minimal", "low", "medium", "high", "xhigh")
 
 
-def parse_reasoning_effort(effort: str) -> Optional[dict]:
+def parse_reasoning_effort(effort: str) -> dict | None:
     """Parse a reasoning effort level into a config dict.
 
     Valid levels: "none", "minimal", "low", "medium", "high", "xhigh".
@@ -170,7 +169,7 @@ def is_termux() -> bool:
     return bool(os.getenv("TERMUX_VERSION") or "com.termux/files/usr" in prefix)
 
 
-_wsl_detected: Optional[bool] = None
+_wsl_detected: bool | None = None
 
 
 def is_wsl() -> bool:
@@ -191,7 +190,7 @@ def is_wsl() -> bool:
     return _wsl_detected
 
 
-_container_detected: Optional[bool] = None
+_container_detected: bool | None = None
 
 
 def is_container() -> bool:

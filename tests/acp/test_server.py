@@ -31,7 +31,6 @@ from acp.schema import (
 from acp_adapter.server import HermesACPAgent, HERMES_VERSION
 from acp_adapter.session import SessionManager
 from hermes_state import SessionDB
-from typing import List
 
 
 @pytest.fixture()
@@ -515,7 +514,7 @@ class TestPrompt:
         # session_update should have been called with the final message
         mock_conn.session_update.assert_called()
         # Get the last call's update argument
-        last_call = mock_conn.session_update.call_args_List[-1]
+        last_call = mock_conn.session_update.call_args_list[-1]
         update = last_call[1].get("update") or last_call[0][1]
         assert update.session_update == "agent_message_chunk"
 

@@ -4,7 +4,6 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from typing import Optional
 
 
 @pytest.fixture
@@ -21,7 +20,7 @@ def git_repo(tmp_path):
     return repo
 
 
-def _force_remove_worktree(info: Optional[dict]) -> None:
+def _force_remove_worktree(info: dict | None) -> None:
     if not info:
         return
     subprocess.run(

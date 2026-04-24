@@ -201,7 +201,7 @@ class PluginContext:
         schema: dict,
         handler: Callable,
         check_fn: Callable | None = None,
-        requires_env: Optional[list] = None,
+        requires_env: list | None = None,
         is_async: bool = False,
         description: str = "",
         emoji: str = "",
@@ -287,7 +287,7 @@ class PluginContext:
     ) -> None:
         """Register a slash command (e.g. ``/lcm``) available in CLI and gateway sessions.
 
-        The handler signature is ``fn(raw_args: str) -> Optional[str]``.
+        The handler signature is ``fn(raw_args: str) -> str | None``.
         It may also be an async callable — the gateway dispatch handles both.
 
         Unlike ``register_cli_command()`` (which creates ``hermes <subcommand>``

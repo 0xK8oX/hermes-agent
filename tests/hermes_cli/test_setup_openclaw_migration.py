@@ -5,7 +5,6 @@ from types import ModuleType
 from unittest.mock import MagicMock, patch
 
 from hermes_cli import setup as setup_mod
-from typing import List
 
 
 # ---------------------------------------------------------------------------
@@ -98,14 +97,14 @@ class TestOfferOpenclawMigration:
         assert fake_mod.Migrator.call_count == 2
 
         # First call: dry-run preview (execute=False, overwrite=True to show all)
-        preview_kwargs = fake_mod.Migrator.call_args_List[0][1]
+        preview_kwargs = fake_mod.Migrator.call_args_list[0][1]
         assert preview_kwargs["execute"] is False
         assert preview_kwargs["overwrite"] is True
         assert preview_kwargs["migrate_secrets"] is True
         assert preview_kwargs["preset_name"] == "full"
 
         # Second call: actual execution (execute=True, overwrite=False to preserve)
-        exec_kwargs = fake_mod.Migrator.call_args_List[1][1]
+        exec_kwargs = fake_mod.Migrator.call_args_list[1][1]
         assert exec_kwargs["execute"] is True
         assert exec_kwargs["overwrite"] is False
         assert exec_kwargs["migrate_secrets"] is True

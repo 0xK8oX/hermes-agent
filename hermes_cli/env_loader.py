@@ -7,7 +7,6 @@ import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
-from typing import List
 
 
 # Env var name suffixes that indicate credential values.  These are the
@@ -143,7 +142,7 @@ def load_hermes_dotenv(
     *,
     hermes_home: str | os.PathLike | None = None,
     project_env: str | os.PathLike | None = None,
-) -> List[Path]:
+) -> list[Path]:
     """Load Hermes environment files with user config taking precedence.
 
     Behavior:
@@ -152,7 +151,7 @@ def load_hermes_dotenv(
       the user env exists.
     - if no user env exists, the project `.env` also overrides stale shell vars.
     """
-    loaded: List[Path] = []
+    loaded: list[Path] = []
 
     home_path = Path(hermes_home or os.getenv("HERMES_HOME", Path.home() / ".hermes"))
     user_env = home_path / ".env"

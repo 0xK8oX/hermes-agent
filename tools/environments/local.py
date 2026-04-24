@@ -8,7 +8,6 @@ import subprocess
 import tempfile
 
 from tools.environments.base import BaseEnvironment, _pipe_stdin
-from typing import Optional, Dict, Set
 
 _IS_WINDOWS = platform.system() == "Windows"
 
@@ -19,7 +18,7 @@ _HERMES_PROVIDER_ENV_FORCE_PREFIX = "_HERMES_FORCE_"
 
 def _build_provider_env_blocklist() -> frozenset:
     """Derive the blocklist from provider, tool, and gateway config."""
-    blocked: Set[str] = set()
+    blocked: set[str] = set()
 
     try:
         from hermes_cli.auth import PROVIDER_REGISTRY
@@ -108,14 +107,14 @@ def _build_provider_env_blocklist() -> frozenset:
 _HERMES_PROVIDER_ENV_BLOCKLIST = _build_provider_env_blocklist()
 
 
-def _sanitize_subprocess_env(base_env: Optional[dict], extra_env: Optional[dict] = None) -> dict:
+def _sanitize_subprocess_env(base_env: dict | None, extra_env: dict | None = None) -> dict:
     """Filter Hermes-managed secrets from a subprocess environment."""
     try:
         from tools.env_passthrough import is_env_passthrough as _is_passthrough
     except Exception:
         _is_passthrough = lambda _: False  # noqa: E731
 
-    sanitized: Dict[str, str] = {}
+    sanitized: dict[str, str] = {}
 
     for key, value in (base_env or {}).items():
         if key.startswith(_HERMES_PROVIDER_ENV_FORCE_PREFIX):
@@ -337,7 +336,7 @@ class LocalEnvironment(BaseEnvironment):
 
     def _run_bash(self, cmd_string: str, *, login: bool = False,
                   timeout: int = 120,
-                  stdin_data: Optional[str] = None) -> subprocess.Popen:
+                  stdin_data: str | None = None) -> subprocess.Popen:
         bash = _find_bash()
         # For login-shell invocations (used by init_session to build the
         # environment snapshot), prepend sources for the user's bashrc /

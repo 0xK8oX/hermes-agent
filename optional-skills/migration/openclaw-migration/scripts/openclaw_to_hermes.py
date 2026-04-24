@@ -17,7 +17,7 @@ import shutil
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Set
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 try:
     import yaml
@@ -184,7 +184,7 @@ MIGRATION_OPTION_METADATA: Dict[str, Dict[str, str]] = {
         "description": "Archive OpenClaw logging and diagnostics configuration.",
     },
 }
-MIGRATION_PRESETS: Dict[str, Set[str]] = {
+MIGRATION_PRESETS: Dict[str, set[str]] = {
     "user-data": {
         "soul",
         "workspace-agents",
@@ -248,7 +248,7 @@ def resolve_selected_options(
     include: Optional[Sequence[str]] = None,
     exclude: Optional[Sequence[str]] = None,
     preset: Optional[str] = None,
-) -> Set[str]:
+) -> set[str]:
     include_values = parse_selection_values(include)
     exclude_values = parse_selection_values(exclude)
     valid = set(MIGRATION_OPTION_METADATA)
@@ -572,7 +572,7 @@ class Migrator:
         overwrite: bool,
         migrate_secrets: bool,
         output_dir: Optional[Path],
-        selected_options: Optional[Set[str]] = None,
+        selected_options: Optional[set[str]] = None,
         preset_name: str = "",
         skill_conflict_mode: str = "skip",
     ):
@@ -1674,7 +1674,7 @@ class Migrator:
         source_root: Optional[Path],
         destination_root: Path,
         kind: str,
-        ignore_dir_names: Optional[Set[str]] = None,
+        ignore_dir_names: Optional[set[str]] = None,
     ) -> None:
         if not source_root or not source_root.exists():
             self.record(kind, None, destination_root, "skipped", "Source directory not found")
@@ -2114,9 +2114,9 @@ class Migrator:
             else:
                 sr["mode"] = mode or "none"
             if reset.get("atHour") is not None:
-                sr["at_hour"] = reSet["atHour"]
+                sr["at_hour"] = reset["atHour"]
             if reset.get("idleMinutes"):
-                sr["idle_minutes"] = reSet["idleMinutes"]
+                sr["idle_minutes"] = reset["idleMinutes"]
             changes = True
         elif isinstance(reset_triggers, list) and reset_triggers:
             # Simple string triggers: ["daily", "idle"]

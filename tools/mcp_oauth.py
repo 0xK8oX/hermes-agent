@@ -44,7 +44,7 @@ import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
-from typing import Any, Optional, Tuple, Dict
+from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 logger = logging.getLogger(__name__)
@@ -83,7 +83,7 @@ class OAuthNonInteractiveError(RuntimeError):
 
 # Port used by the most recent build_oauth_auth() call.  Exposed so that
 # tests can verify the callback server and the redirect_uri share a port.
-_oauth_port: Optional[int] = None
+_oauth_port: int | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -144,7 +144,7 @@ def _can_open_browser() -> bool:
     return False
 
 
-def _read_json(path: Path) -> Optional[dict]:
+def _read_json(path: Path) -> dict | None:
     """Read a JSON file, returning None if it doesn't exist or is invalid."""
     if not path.exists():
         return None
@@ -285,7 +285,7 @@ class HermesTokenStorage:
 # ---------------------------------------------------------------------------
 
 
-def _make_callback_handler() -> Tuple[type, dict]:
+def _make_callback_handler() -> tuple[type, dict]:
     """Create a per-flow callback HTTP handler class with its own result dict.
 
     Returns ``(HandlerClass, result_dict)`` where *result_dict* is a mutable
@@ -293,7 +293,7 @@ def _make_callback_handler() -> Tuple[type, dict]:
     OAuth redirect arrives.  Each call returns a fresh pair so concurrent
     flows don't stomp on each other.
     """
-    result: Dict[str, Any] = {"auth_code": None, "state": None, "error": None}
+    result: dict[str, Any] = {"auth_code": None, "state": None, "error": None}
 
     class _Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:  # noqa: N802
@@ -355,7 +355,7 @@ async def _redirect_handler(authorization_url: str) -> None:
         print("  (Headless environment detected — open the URL manually.)\n", file=sys.stderr)
 
 
-async def _wait_for_callback() -> Tuple[str, Optional[str]]:
+async def _wait_for_callback() -> tuple[str, str | None]:
     """Wait for the OAuth callback to arrive on the local callback server.
 
     Uses the module-level ``_oauth_port`` which is set by ``build_oauth_auth``
@@ -466,7 +466,7 @@ def _build_client_metadata(cfg: dict) -> "OAuthClientMetadata":
     scope = cfg.get("scope")
     redirect_uri = f"http://127.0.0.1:{port}/callback"
 
-    metadata_kwargs: Dict[str, Any] = {
+    metadata_kwargs: dict[str, Any] = {
         "client_name": client_name,
         "redirect_uris": [AnyUrl(redirect_uri)],
         "grant_types": ["authorization_code", "refresh_token"],
@@ -493,7 +493,7 @@ def _maybe_preregister_client(
     port = cfg["_resolved_port"]
     redirect_uri = f"http://127.0.0.1:{port}/callback"
 
-    info_dict: Dict[str, Any] = {
+    info_dict: dict[str, Any] = {
         "client_id": client_id,
         "redirect_uris": [redirect_uri],
         "grant_types": client_metadata.grant_types,
@@ -521,7 +521,7 @@ def _parse_base_url(server_url: str) -> str:
 def build_oauth_auth(
     server_name: str,
     server_url: str,
-    oauth_config: Optional[dict] = None,
+    oauth_config: dict | None = None,
 ) -> "OAuthClientProvider | None":
     """Build an ``httpx.Auth``-compatible OAuth handler for an MCP server.
 

@@ -18,7 +18,7 @@ import time
 import uuid
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import IO, Callable, Protocol, Optional, Tuple, List
+from typing import IO, Callable, Protocol
 
 from hermes_constants import get_hermes_home
 from tools.interrupt import is_interrupted
@@ -112,7 +112,7 @@ def _pipe_stdin(proc: subprocess.Popen, data: str) -> None:
 
 
 def _popen_bash(
-    cmd: List[str], stdin_data: Optional[str] = None, **kwargs
+    cmd: list[str], stdin_data: str | None = None, **kwargs
 ) -> subprocess.Popen:
     """Spawn a subprocess with standard stdout/stderr/stdin setup.
 
@@ -149,7 +149,7 @@ def _save_json_store(path: Path, data: dict) -> None:
     path.write_text(json.dumps(data, indent=2))
 
 
-def _file_mtime_key(host_path: str) -> Tuple[float, int] | None:
+def _file_mtime_key(host_path: str) -> tuple[float, int] | None:
     """Return ``(mtime, size)`` for cache comparison, or ``None`` if unreadable."""
     try:
         st = Path(host_path).stat()
@@ -170,15 +170,15 @@ class ProcessHandle(Protocol):
     return _ThreadedProcessHandle which adapts their blocking calls.
     """
 
-    def poll(self) -> Optional[int]: ...
+    def poll(self) -> int | None: ...
     def kill(self) -> None: ...
-    def wait(self, timeout: Optional[float] = None) -> int: ...
+    def wait(self, timeout: float | None = None) -> int: ...
 
     @property
     def stdout(self) -> IO[str] | None: ...
 
     @property
-    def returncode(self) -> Optional[int]: ...
+    def returncode(self) -> int | None: ...
 
 
 class _ThreadedProcessHandle:
@@ -192,12 +192,12 @@ class _ThreadedProcessHandle:
 
     def __init__(
         self,
-        exec_fn: Callable[[], Tuple[str, int]],
+        exec_fn: Callable[[], tuple[str, int]],
         cancel_fn: Callable[[], None] | None = None,
     ):
         self._cancel_fn = cancel_fn
         self._done = threading.Event()
-        self._returncode: Optional[int] = None
+        self._returncode: int | None = None
         self._error: Exception | None = None
 
         # Pipe for stdout — drain thread in _wait_for_process reads the read end.
@@ -232,10 +232,10 @@ class _ThreadedProcessHandle:
         return self._stdout
 
     @property
-    def returncode(self) -> Optional[int]:
+    def returncode(self) -> int | None:
         return self._returncode
 
-    def poll(self) -> Optional[int]:
+    def poll(self) -> int | None:
         return self._returncode if self._done.is_set() else None
 
     def kill(self):
@@ -245,7 +245,7 @@ class _ThreadedProcessHandle:
             except Exception:
                 pass
 
-    def wait(self, timeout: Optional[float] = None) -> int:
+    def wait(self, timeout: float | None = None) -> int:
         self._done.wait(timeout=timeout)
         return self._returncode
 
@@ -309,7 +309,7 @@ class BaseEnvironment(ABC):
         *,
         login: bool = False,
         timeout: int = 120,
-        stdin_data: Optional[str] = None,
+        stdin_data: str | None = None,
     ) -> ProcessHandle:
         """Spawn a bash process to run *cmd_string*.
 
@@ -436,7 +436,7 @@ class BaseEnvironment(ABC):
         an orphan with ``PPID=1`` when python is shut down mid-tool — the
         ``sleep 300``-survives-30-min bug Physikal and I both hit.
         """
-        output_chunks: List[str] = []
+        output_chunks: list[str] = []
 
         # Non-blocking drain via select().
         #
@@ -698,8 +698,8 @@ class BaseEnvironment(ABC):
         command: str,
         cwd: str = "",
         *,
-        timeout: Optional[int] = None,
-        stdin_data: Optional[str] = None,
+        timeout: int | None = None,
+        stdin_data: str | None = None,
     ) -> dict:
         """Execute a command, return {"output": str, "returncode": int}."""
         self._before_execute()
@@ -755,7 +755,7 @@ class BaseEnvironment(ABC):
         except Exception:
             pass
 
-    def _prepare_command(self, command: str) -> Tuple[str, Optional[str]]:
+    def _prepare_command(self, command: str) -> tuple[str, str | None]:
         """Transform sudo commands if SUDO_PASSWORD is available."""
         from tools.terminal_tool import _transform_sudo_command
 

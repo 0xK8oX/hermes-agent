@@ -29,7 +29,7 @@ def _ensure_discord_mock():
                 self.name = name
                 self.description = description
                 self.parent = parent
-                self._children: Dict[str, object] = {}
+                self._children: dict[str, object] = {}
                 if parent is not None:
                     parent.add_command(self)
 
@@ -598,7 +598,6 @@ async def test_auto_create_thread_returns_none_when_direct_and_fallback_fail(ada
 
 
 import discord as _discord_mod  # noqa: E402 — mock or real, used below
-from typing import Tuple, List, Dict
 
 
 class _FakeTextChannel:
@@ -843,7 +842,7 @@ def test_register_skill_command_callback_dispatches_by_name(adapter):
     assert skill_cmd.callback is not None
 
     # Stub out _run_simple_slash so we can verify the dispatched text.
-    dispatched: List[str] = []
+    dispatched: list[str] = []
 
     async def fake_run(_interaction, text):
         dispatched.append(text)
@@ -873,7 +872,7 @@ def test_register_skill_command_handles_unknown_skill_gracefully(adapter):
 
     skill_cmd = adapter._client.tree.commands["skill"]
 
-    sent: List[dict] = []
+    sent: list[dict] = []
 
     async def fake_send(text, ephemeral=False):
         sent.append({"text": text, "ephemeral": ephemeral})
@@ -904,7 +903,7 @@ def test_register_skill_command_payload_fits_discord_8kb_limit(adapter):
 
     # Simulate the largest catalog the collector will ever produce:
     # 20 categories × 25 skills each, with verbose 100-char descriptions.
-    large_categories: Dict[str, List[Tuple[str, str, str]]] = {}
+    large_categories: dict[str, list[tuple[str, str, str]]] = {}
     long_desc = "A verbose description padded to approximately 100 chars " + "." * 42
     for i in range(20):
         cat = f"cat{i:02d}"

@@ -14,7 +14,6 @@ import tempfile
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Dict
 
 _HERMES_HOME = Path(os.environ.get("HERMES_HOME", Path.home() / ".hermes"))
 DATA_DIR = _HERMES_HOME / "skills" / "productivity" / "memento-flashcards" / "data"
@@ -206,7 +205,7 @@ def cmd_stats(args: argparse.Namespace) -> None:
         if c["status"] != "retired" and _parse_iso(c["next_review_at"]) <= now:
             due_now += 1
 
-    collections: Dict[str, int] = {}
+    collections: dict[str, int] = {}
     for c in data["cards"]:
         name = c["collection"]
         collections[name] = collections.get(name, 0) + 1

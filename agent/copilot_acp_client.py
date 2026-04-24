@@ -19,7 +19,7 @@ import time
 from collections import deque
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Optional, Tuple, List, Dict
+from typing import Any
 
 from agent.file_safety import get_read_block_error, is_write_denied
 from agent.redact import redact_sensitive_text
@@ -39,14 +39,14 @@ def _resolve_command() -> str:
     )
 
 
-def _resolve_args() -> List[str]:
+def _resolve_args() -> list[str]:
     raw = os.getenv("HERMES_COPILOT_ACP_ARGS", "").strip()
     if not raw:
         return ["--acp", "--stdio"]
     return shlex.split(raw)
 
 
-def _jsonrpc_error(message_id: Any, code: int, message: str) -> Dict[str, Any]:
+def _jsonrpc_error(message_id: Any, code: int, message: str) -> dict[str, Any]:
     return {
         "jsonrpc": "2.0",
         "id": message_id,
@@ -70,12 +70,12 @@ def _permission_denied(message_id: Any) -> dict[str, Any]:
 
 
 def _format_messages_as_prompt(
-    messages: List[Dict[str, Any]],
-    model: Optional[str] = None,
-    tools: List[Dict[str, Any]] | None = None,
+    messages: list[dict[str, Any]],
+    model: str | None = None,
+    tools: list[dict[str, Any]] | None = None,
     tool_choice: Any = None,
 ) -> str:
-    sections: List[str] = [
+    sections: list[str] = [
         "You are being used as the active ACP agent backend for Hermes.",
         "Use ACP capabilities to complete tasks.",
         "IMPORTANT: If you take an action with a tool, you MUST output tool calls using <tool_call>{...}</tool_call> blocks with JSON exactly in OpenAI function-call shape.",
@@ -85,7 +85,7 @@ def _format_messages_as_prompt(
         sections.append(f"Hermes requested model hint: {model}")
 
     if isinstance(tools, list) and tools:
-        tool_specs: List[Dict[str, Any]] = []
+        tool_specs: list[dict[str, Any]] = []
         for t in tools:
             if not isinstance(t, dict):
                 continue
@@ -113,7 +113,7 @@ def _format_messages_as_prompt(
     if tool_choice is not None:
         sections.append(f"Tool choice hint: {json.dumps(tool_choice, ensure_ascii=False)}")
 
-    transcript: List[str] = []
+    transcript: list[str] = []
     for message in messages:
         if not isinstance(message, dict):
             continue
@@ -156,7 +156,7 @@ def _render_message_content(content: Any) -> str:
             return str(content.get("content") or "").strip()
         return json.dumps(content, ensure_ascii=True)
     if isinstance(content, list):
-        parts: List[str] = []
+        parts: list[str] = []
         for item in content:
             if isinstance(item, str):
                 parts.append(item)
@@ -168,12 +168,12 @@ def _render_message_content(content: Any) -> str:
     return str(content).strip()
 
 
-def _extract_tool_calls_from_text(text: str) -> Tuple[List[SimpleNamespace], str]:
+def _extract_tool_calls_from_text(text: str) -> tuple[list[SimpleNamespace], str]:
     if not isinstance(text, str) or not text.strip():
         return [], ""
 
-    extracted: List[SimpleNamespace] = []
-    consumed_spans: List[Tuple[int, int]] = []
+    extracted: list[SimpleNamespace] = []
+    consumed_spans: list[tuple[int, int]] = []
 
     def _try_add_tool_call(raw_json: str) -> None:
         try:
@@ -221,14 +221,14 @@ def _extract_tool_calls_from_text(text: str) -> Tuple[List[SimpleNamespace], str
         return extracted, text.strip()
 
     consumed_spans.sort()
-    merged: List[Tuple[int, int]] = []
+    merged: list[tuple[int, int]] = []
     for start, end in consumed_spans:
         if not merged or start > merged[-1][1]:
             merged.append((start, end))
         else:
             merged[-1] = (merged[-1][0], max(merged[-1][1], end))
 
-    parts: List[str] = []
+    parts: list[str] = []
     cursor = 0
     for start, end in merged:
         if cursor < start:
@@ -274,14 +274,14 @@ class CopilotACPClient:
     def __init__(
         self,
         *,
-        api_key: Optional[str] = None,
-        base_url: Optional[str] = None,
-        default_headers: Dict[str, str] | None = None,
-        acp_command: Optional[str] = None,
-        acp_args: Optional[List[str]] = None,
-        acp_cwd: Optional[str] = None,
-        command: Optional[str] = None,
-        args: Optional[List[str]] = None,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        default_headers: dict[str, str] | None = None,
+        acp_command: str | None = None,
+        acp_args: list[str] | None = None,
+        acp_cwd: str | None = None,
+        command: str | None = None,
+        args: list[str] | None = None,
         **_: Any,
     ):
         self.api_key = api_key or "copilot-acp"
@@ -315,10 +315,10 @@ class CopilotACPClient:
     def _create_chat_completion(
         self,
         *,
-        model: Optional[str] = None,
-        messages: List[Dict[str, Any]] | None = None,
-        timeout: Optional[float] = None,
-        tools: List[Dict[str, Any]] | None = None,
+        model: str | None = None,
+        messages: list[dict[str, Any]] | None = None,
+        timeout: float | None = None,
+        tools: list[dict[str, Any]] | None = None,
         tool_choice: Any = None,
         **_: Any,
     ) -> Any:
@@ -372,7 +372,7 @@ class CopilotACPClient:
             model=model or "copilot-acp",
         )
 
-    def _run_prompt(self, prompt_text: str, *, timeout_seconds: float) -> Tuple[str, str]:
+    def _run_prompt(self, prompt_text: str, *, timeout_seconds: float) -> tuple[str, str]:
         try:
             proc = subprocess.Popen(
                 [self._acp_command] + self._acp_args,
@@ -397,7 +397,7 @@ class CopilotACPClient:
         with self._active_process_lock:
             self._active_process = proc
 
-        inbox: queue.Queue[Dict[str, Any]] = queue.Queue()
+        inbox: queue.Queue[dict[str, Any]] = queue.Queue()
         stderr_tail: deque[str] = deque(maxlen=40)
 
         def _stdout_reader() -> None:
@@ -422,7 +422,7 @@ class CopilotACPClient:
 
         next_id = 0
 
-        def _request(method: str, params: Dict[str, Any], *, text_parts: Optional[List[str]] = None, reasoning_parts: Optional[List[str]] = None) -> Any:
+        def _request(method: str, params: dict[str, Any], *, text_parts: list[str] | None = None, reasoning_parts: list[str] | None = None) -> Any:
             nonlocal next_id
             next_id += 1
             request_id = next_id
@@ -496,8 +496,8 @@ class CopilotACPClient:
             if not session_id:
                 raise RuntimeError("Copilot ACP did not return a sessionId.")
 
-            text_parts: List[str] = []
-            reasoning_parts: List[str] = []
+            text_parts: list[str] = []
+            reasoning_parts: list[str] = []
             _request(
                 "session/prompt",
                 {
@@ -518,12 +518,12 @@ class CopilotACPClient:
 
     def _handle_server_message(
         self,
-        msg: Dict[str, Any],
+        msg: dict[str, Any],
         *,
         process: subprocess.Popen[str],
         cwd: str,
-        text_parts: Optional[List[str]],
-        reasoning_parts: Optional[List[str]],
+        text_parts: list[str] | None,
+        reasoning_parts: list[str] | None,
     ) -> bool:
         method = msg.get("method")
         if not isinstance(method, str):

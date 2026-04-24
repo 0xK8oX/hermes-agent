@@ -12,7 +12,7 @@ import shlex
 import tarfile
 import threading
 from pathlib import Path
-from typing import Any, Optional, Tuple, List, Dict
+from typing import Any, Optional
 
 from hermes_constants import get_hermes_home
 from tools.environments.base import (
@@ -47,7 +47,7 @@ def _direct_snapshot_key(task_id: str) -> str:
     return f"{_DIRECT_SNAPSHOT_NAMESPACE}:{task_id}"
 
 
-def _get_snapshot_restore_candidate(task_id: str) -> Tuple[Optional[str], bool]:
+def _get_snapshot_restore_candidate(task_id: str) -> tuple[str | None, bool]:
     snapshots = _load_snapshots()
     namespaced_key = _direct_snapshot_key(task_id)
     snapshot_id = snapshots.get(namespaced_key)
@@ -66,7 +66,7 @@ def _store_direct_snapshot(task_id: str, snapshot_id: str) -> None:
     _save_snapshots(snapshots)
 
 
-def _delete_direct_snapshot(task_id: str, snapshot_id: Optional[str] = None) -> None:
+def _delete_direct_snapshot(task_id: str, snapshot_id: str | None = None) -> None:
     snapshots = _load_snapshots()
     updated = False
     for key in (_direct_snapshot_key(task_id), task_id):
@@ -159,7 +159,7 @@ class ModalEnvironment(BaseEnvironment):
         image: str,
         cwd: str = "/root",
         timeout: int = 60,
-        modal_sandbox_kwargs: Optional[Dict[str, Any]] = None,
+        modal_sandbox_kwargs: Optional[dict[str, Any]] = None,
         persistent_filesystem: bool = True,
         task_id: str = "default",
     ):
@@ -304,7 +304,7 @@ class ModalEnvironment(BaseEnvironment):
     # individually via drain().
     _STDIN_CHUNK_SIZE = 1 * 1024 * 1024  # 1 MB — safe for both transport paths
 
-    def _modal_bulk_upload(self, files: List[Tuple[str, str]]) -> None:
+    def _modal_bulk_upload(self, files: list[tuple[str, str]]) -> None:
         """Upload many files via tar archive piped through stdin.
 
         Builds a gzipped tar archive in memory and streams it into a
@@ -369,7 +369,7 @@ class ModalEnvironment(BaseEnvironment):
             tar_bytes = tar_bytes.encode()
         dest.write_bytes(tar_bytes)
 
-    def _modal_delete(self, remote_paths: List[str]) -> None:
+    def _modal_delete(self, remote_paths: list[str]) -> None:
         """Batch-delete remote files via exec."""
         rm_cmd = quoted_rm_command(remote_paths)
 
@@ -389,7 +389,7 @@ class ModalEnvironment(BaseEnvironment):
 
     def _run_bash(self, cmd_string: str, *, login: bool = False,
                   timeout: int = 120,
-                  stdin_data: Optional[str] = None):
+                  stdin_data: str | None = None):
         """Return a _ThreadedProcessHandle wrapping an async Modal sandbox exec."""
         sandbox = self._sandbox
         worker = self._worker
@@ -397,7 +397,7 @@ class ModalEnvironment(BaseEnvironment):
         def cancel():
             worker.run_coroutine(sandbox.terminate.aio(), timeout=15)
 
-        def exec_fn() -> Tuple[str, int]:
+        def exec_fn() -> tuple[str, int]:
             async def _do():
                 args = ["bash"]
                 if login:

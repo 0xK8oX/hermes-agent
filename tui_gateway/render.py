@@ -5,10 +5,9 @@ everything returns None and the TUI falls back to its own markdown.tsx.
 """
 
 from __future__ import annotations
-from typing import Optional
 
 
-def render_message(text: str, cols: int = 80) -> Optional[str]:
+def render_message(text: str, cols: int = 80) -> str | None:
     try:
         from agent.rich_output import format_response
     except ImportError:
@@ -22,7 +21,7 @@ def render_message(text: str, cols: int = 80) -> Optional[str]:
         return None
 
 
-def render_diff(text: str, cols: int = 80) -> Optional[str]:
+def render_diff(text: str, cols: int = 80) -> str | None:
     try:
         from agent.rich_output import render_diff as _rd
     except ImportError:

@@ -15,7 +15,6 @@ from pathlib import Path
 
 from hermes_cli.config import get_hermes_home, get_env_path, get_project_root, load_config
 from hermes_constants import display_hermes_home
-from typing import Tuple, List, Dict
 
 
 def _get_git_commit(project_root: Path) -> str:
@@ -93,7 +92,7 @@ def _cron_summary(hermes_home: Path) -> str:
         return "(error reading)"
 
 
-def _configured_platforms() -> List[str]:
+def _configured_platforms() -> list[str]:
     """Return list of configured messaging platform names."""
     checks = {
         "telegram": "TELEGRAM_BOT_TOKEN",
@@ -123,7 +122,7 @@ def _memory_provider(config: dict) -> str:
     return provider if provider else "built-in"
 
 
-def _get_model_and_provider(config: dict) -> Tuple[str, str]:
+def _get_model_and_provider(config: dict) -> tuple[str, str]:
     """Extract model and provider from config."""
     model_cfg = config.get("model", "")
     if isinstance(model_cfg, dict):
@@ -138,7 +137,7 @@ def _get_model_and_provider(config: dict) -> Tuple[str, str]:
     return model, provider
 
 
-def _config_overrides(config: dict) -> Dict[str, str]:
+def _config_overrides(config: dict) -> dict[str, str]:
     """Find non-default config values worth reporting.
     
     Returns a flat dict of dotpath -> value for interesting overrides.

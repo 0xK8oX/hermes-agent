@@ -17,7 +17,7 @@ import logging
 import os
 import tempfile
 import time
-from typing import Any, Mapping, Optional, Dict
+from typing import Any, Mapping, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +70,7 @@ def _parse_reset_seconds(headers: Optional[Mapping[str, str]]) -> Optional[float
 def record_nous_rate_limit(
     *,
     headers: Optional[Mapping[str, str]] = None,
-    error_context: Optional[Dict[str, Any]] = None,
+    error_context: Optional[dict[str, Any]] = None,
     default_cooldown: float = 300.0,
 ) -> None:
     """Record that Nous Portal is rate-limited.

@@ -9,8 +9,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from gateway.config import Platform
-from typing import List
-
 from tools.send_message_tool import (
     _derive_forum_thread_name,
     _parse_target_ref,

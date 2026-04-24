@@ -17,7 +17,6 @@ from unittest.mock import MagicMock, patch
 
 from agent.display import KawaiiSpinner
 from tools.delegate_tool import _build_child_progress_callback
-from typing import List
 
 
 # =========================================================================

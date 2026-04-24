@@ -19,7 +19,7 @@ import time
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from hermes_constants import get_default_hermes_root, get_hermes_home, display_hermes_home
 
@@ -139,7 +139,7 @@ def run_backup(args) -> None:
 
     # Collect files
     print(f"Scanning {display_hermes_home()} ...")
-    files_to_add: List[Tuple[Path, Path]] = []  # (absolute, relative)
+    files_to_add: list[tuple[Path, Path]] = []  # (absolute, relative)
     skipped_dirs = set()
 
     for dirpath, dirnames, filenames in os.walk(hermes_root, followlinks=False):
@@ -239,7 +239,7 @@ def run_backup(args) -> None:
 # Import
 # ---------------------------------------------------------------------------
 
-def _validate_backup_zip(zf: zipfile.ZipFile) -> Tuple[bool, str]:
+def _validate_backup_zip(zf: zipfile.ZipFile) -> tuple[bool, str]:
     """Check that a zip looks like a Hermes backup.
 
     Returns (ok, reason).

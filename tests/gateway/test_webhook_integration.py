@@ -25,7 +25,6 @@ from gateway.config import (
 )
 from gateway.platforms.base import MessageEvent, MessageType, SendResult
 from gateway.platforms.webhook import WebhookAdapter, _INSECURE_NO_AUTH
-from typing import List
 
 
 # ---------------------------------------------------------------------------
@@ -103,7 +102,7 @@ class TestGitHubPRWebhook:
         }
         adapter = _make_adapter(routes)
 
-        captured_events: List[MessageEvent] = []
+        captured_events: list[MessageEvent] = []
 
         async def _capture(event: MessageEvent):
             captured_events.append(event)
@@ -166,7 +165,7 @@ class TestSkillsInjection:
         }
         adapter = _make_adapter(routes)
 
-        captured_events: List[MessageEvent] = []
+        captured_events: list[MessageEvent] = []
 
         async def _capture(event: MessageEvent):
             captured_events.append(event)

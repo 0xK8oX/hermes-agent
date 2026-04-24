@@ -38,7 +38,7 @@ import tempfile
 import threading
 import uuid
 from pathlib import Path
-from typing import Callable, Dict, Any, Optional, Tuple, List
+from typing import Callable, Dict, Any, Optional
 from urllib.parse import urljoin
 
 from hermes_constants import display_hermes_home
@@ -1177,7 +1177,7 @@ def check_tts_requirements() -> bool:
     return False
 
 
-def _resolve_openai_audio_client_config() -> Tuple[str, str]:
+def _resolve_openai_audio_client_config() -> tuple[str, str]:
     """Return direct OpenAI audio config or a managed gateway fallback.
 
     When ``tts.use_gateway`` is set in config, the Tool Gateway is preferred
@@ -1309,7 +1309,7 @@ def stream_tts_to_speaker(
         min_sentence_len = 20
         long_flush_len = 100
         queue_timeout = 0.5
-        _spoken_sentences: List[str] = []  # track spoken sentences to skip duplicates
+        _spoken_sentences: list[str] = []  # track spoken sentences to skip duplicates
         # Regex to strip complete <think>...</think> blocks from buffer
         _think_block_re = re.compile(r'<think[\s>].*?</think>', flags=re.DOTALL)
 

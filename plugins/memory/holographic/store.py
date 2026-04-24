@@ -7,7 +7,6 @@ import re
 import sqlite3
 import threading
 from pathlib import Path
-from typing import Optional, List, Set
 
 try:
     from . import holographic as hrr
@@ -188,10 +187,10 @@ class MemoryStore:
     def search_facts(
         self,
         query: str,
-        category: Optional[str] = None,
+        category: str | None = None,
         min_trust: float = 0.3,
         limit: int = 10,
-    ) -> List[dict]:
+    ) -> list[dict]:
         """Full-text search over facts using FTS5.
 
         Returns a list of fact dicts ordered by FTS5 rank, then trust_score
@@ -239,10 +238,10 @@ class MemoryStore:
     def update_fact(
         self,
         fact_id: int,
-        content: Optional[str] = None,
-        trust_delta: Optional[float] = None,
-        tags: Optional[str] = None,
-        category: Optional[str] = None,
+        content: str | None = None,
+        trust_delta: float | None = None,
+        tags: str | None = None,
+        category: str | None = None,
     ) -> bool:
         """Partially update a fact. Trust is clamped to [0, 1].
 
@@ -255,7 +254,7 @@ class MemoryStore:
             if row is None:
                 return False
 
-            assignments: List[str] = ["updated_at = CURRENT_TIMESTAMP"]
+            assignments: list[str] = ["updated_at = CURRENT_TIMESTAMP"]
             params: list = []
 
             if content is not None:
@@ -319,10 +318,10 @@ class MemoryStore:
 
     def list_facts(
         self,
-        category: Optional[str] = None,
+        category: str | None = None,
         min_trust: float = 0.0,
         limit: int = 50,
-    ) -> List[dict]:
+    ) -> list[dict]:
         """Browse facts ordered by trust_score descending.
 
         Optionally filter by category and minimum trust score.
@@ -392,7 +391,7 @@ class MemoryStore:
     # Entity helpers
     # ------------------------------------------------------------------
 
-    def _extract_entities(self, text: str) -> List[str]:
+    def _extract_entities(self, text: str) -> list[str]:
         """Extract entity candidates from text using simple regex rules.
 
         Rules applied (in order):
@@ -403,8 +402,8 @@ class MemoryStore:
 
         Returns a deduplicated list preserving first-seen order.
         """
-        seen: Set[str] = set()
-        candidates: List[str] = []
+        seen: set[str] = set()
+        candidates: list[str] = []
 
         def _add(name: str) -> None:
             stripped = name.strip()
@@ -530,7 +529,7 @@ class MemoryStore:
             )
             self._conn.commit()
 
-    def rebuild_all_vectors(self, dim: Optional[int] = None) -> int:
+    def rebuild_all_vectors(self, dim: int | None = None) -> int:
         """Recompute all HRR vectors + banks from text. For recovery/migration.
 
         Returns the number of facts processed.
@@ -546,7 +545,7 @@ class MemoryStore:
                 "SELECT fact_id, content, category FROM facts"
             ).fetchall()
 
-            categories: Set[str] = set()
+            categories: set[str] = set()
             for row in rows:
                 self._compute_hrr_vector(row["fact_id"], row["content"])
                 categories.add(row["category"])

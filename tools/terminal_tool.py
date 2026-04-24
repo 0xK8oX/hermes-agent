@@ -42,7 +42,7 @@ import atexit
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Optional, Dict, Any, List
 
 logger = logging.getLogger(__name__)
 
@@ -213,7 +213,7 @@ def _check_all_guards(command: str, env_type: str) -> dict:
 _WORKDIR_SAFE_RE = re.compile(r'^[A-Za-z0-9/\\:_\-.~ +@=,]+$')
 
 
-def _validate_workdir(workdir: str) -> Optional[str]:
+def _validate_workdir(workdir: str) -> str | None:
     """Reject workdir values that don't look like a filesystem path.
 
     Uses an allowlist of safe characters rather than a deny-list, so novel
@@ -404,7 +404,7 @@ def _looks_like_env_assignment(token: str) -> bool:
     return bool(re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", name))
 
 
-def _read_shell_token(command: str, start: int) -> Tuple[str, int]:
+def _read_shell_token(command: str, start: int) -> tuple[str, int]:
     """Read one shell token, preserving quotes/escapes, starting at *start*."""
     i = start
     n = len(command)
@@ -440,9 +440,9 @@ def _read_shell_token(command: str, start: int) -> Tuple[str, int]:
     return command[start:i], i
 
 
-def _rewrite_real_sudo_invocations(command: str) -> Tuple[str, bool]:
+def _rewrite_real_sudo_invocations(command: str) -> tuple[str, bool]:
     """Rewrite only real unquoted sudo command words, not plain text mentions."""
-    out: List[str] = []
+    out: list[str] = []
     i = 0
     n = len(command)
     command_start = True
@@ -531,7 +531,7 @@ def _rewrite_compound_background(command: str) -> str:
     # Position in *command* just after the most recent `&&` / `||` at depth 0
     # in the current statement; -1 when no chain operator is active.
     last_chain_op_end = -1
-    rewrites: List[Tuple[int, int]] = []  # (chain_op_end, amp_pos)
+    rewrites: list[tuple[int, int]] = []  # (chain_op_end, amp_pos)
 
     while i < n:
         ch = command[i]
@@ -666,7 +666,7 @@ def _rewrite_compound_background(command: str) -> str:
     return result
 
 
-def _transform_sudo_command(command: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
+def _transform_sudo_command(command: str | None) -> tuple[str | None, str | None]:
     """
     Transform sudo commands to use -S flag if SUDO_PASSWORD is available.
 
@@ -1250,7 +1250,7 @@ atexit.register(_atexit_cleanup)
 # wastes a turn investigating something that just means "no matches".
 # This lookup adds a human-readable note so the agent can move on.
 
-def _interpret_exit_code(command: str, exit_code: int) -> Optional[str]:
+def _interpret_exit_code(command: str, exit_code: int) -> str | None:
     """Return a human-readable note when a non-zero exit code is non-erroneous.
 
     Returns None when the exit code is 0 or genuinely signals an error.
@@ -1280,7 +1280,7 @@ def _interpret_exit_code(command: str, exit_code: int) -> Optional[str]:
         return None
 
     # Command-specific semantics
-    semantics: Dict[str, dict[int, str]] = {
+    semantics: dict[str, dict[int, str]] = {
         # grep/rg/ag/ack: 1=no matches found (normal), 2+=real error
         "grep":  {1: "No matches found (not an error)"},
         "egrep": {1: "No matches found (not an error)"},
@@ -1355,7 +1355,7 @@ def _looks_like_help_or_version_command(command: str) -> bool:
     )
 
 
-def _foreground_background_guidance(command: str) -> Optional[str]:
+def _foreground_background_guidance(command: str) -> str | None:
     """Suggest background mode when a foreground command looks long-lived.
 
     Prevents workflows that start a server/watch process and then stall before

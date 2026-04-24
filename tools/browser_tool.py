@@ -63,7 +63,7 @@ import tempfile
 import threading
 import time
 import requests
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Dict, Any, Optional, List
 from pathlib import Path
 from agent.auxiliary_client import call_llm
 from hermes_constants import get_hermes_home
@@ -112,14 +112,14 @@ _SANE_PATH = os.pathsep.join(_SANE_PATH_DIRS)
 
 
 @functools.lru_cache(maxsize=1)
-def _discover_homebrew_node_dirs() -> Tuple[str, ...]:
+def _discover_homebrew_node_dirs() -> tuple[str, ...]:
     """Find Homebrew versioned Node.js bin directories (e.g. node@20, node@24).
 
     When Node is installed via ``brew install node@24`` and NOT linked into
     /opt/homebrew/bin, agent-browser isn't discoverable on the default PATH.
     This function finds those directories so they can be prepended.
     """
-    dirs: List[str] = []
+    dirs: list[str] = []
     homebrew_opt = "/opt/homebrew/opt"
     if not os.path.isdir(homebrew_opt):
         return tuple(dirs)
@@ -134,7 +134,7 @@ def _discover_homebrew_node_dirs() -> Tuple[str, ...]:
     return tuple(dirs)
 
 
-def _browser_candidate_path_dirs() -> List[str]:
+def _browser_candidate_path_dirs() -> list[str]:
     """Return ordered browser CLI PATH candidates shared by discovery and execution."""
     hermes_home = get_hermes_home()
     hermes_node_bin = str(hermes_home / "node" / "bin")
@@ -145,7 +145,7 @@ def _merge_browser_path(existing_path: str = "") -> str:
     """Prepend browser-specific PATH fallbacks without reordering existing entries."""
     path_parts = [p for p in (existing_path or "").split(os.pathsep) if p]
     existing_parts = set(path_parts)
-    prefix_parts: List[str] = []
+    prefix_parts: list[str] = []
 
     for part in _browser_candidate_path_dirs():
         if not part or part in existing_parts or part in prefix_parts:
@@ -156,7 +156,7 @@ def _merge_browser_path(existing_path: str = "") -> str:
     return os.pathsep.join(prefix_parts + path_parts)
 
 # Throttle screenshot cleanup to avoid repeated full directory scans.
-_last_screenshot_cleanup_by_dir: Dict[str, float] = {}
+_last_screenshot_cleanup_by_dir: dict[str, float] = {}
 
 # ============================================================================
 # Configuration
@@ -1377,7 +1377,7 @@ def _truncate_snapshot(snapshot_text: str, max_chars: int = 8000) -> str:
         return snapshot_text
 
     lines = snapshot_text.split('\n')
-    result: List[str] = []
+    result: list[str] = []
     chars = 0
     for line in lines:
         if chars + len(line) + 1 > max_chars - 80:  # reserve space for note

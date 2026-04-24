@@ -30,7 +30,7 @@ Usage:
 """
 
 import re
-from typing import Tuple, Optional, List, Callable, Dict
+from typing import Tuple, Optional, List, Callable
 from difflib import SequenceMatcher
 
 UNICODE_MAP = {
@@ -341,7 +341,7 @@ def _map_positions_norm_to_orig(
 ) -> List[Tuple[int, int]]:
     """Convert (start, end) positions in the normalised string to original positions."""
     # Invert the map: norm_pos -> first original position with that norm_pos
-    norm_to_orig_start: Dict[int, int] = {}
+    norm_to_orig_start: dict[int, int] = {}
     for orig_pos, norm_pos in enumerate(orig_to_norm[:-1]):
         if norm_pos not in norm_to_orig_start:
             norm_to_orig_start[norm_pos] = orig_pos

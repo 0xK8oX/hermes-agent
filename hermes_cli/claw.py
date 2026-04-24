@@ -18,8 +18,6 @@ from pathlib import Path
 
 from hermes_cli.config import get_hermes_home, get_config_path, load_config, save_config
 from hermes_constants import get_optional_skills_dir
-from typing import Tuple, List
-
 from hermes_cli.setup import (
     Colors,
     color,
@@ -55,13 +53,13 @@ _OPENCLAW_SCRIPT_INSTALLED = (
 # Known OpenClaw directory names (current + legacy)
 _OPENCLAW_DIR_NAMES = (".openclaw", ".clawdbot", ".moltbot")
 
-def _detect_openclaw_processes() -> List[str]:
+def _detect_openclaw_processes() -> list[str]:
     """Detect running OpenClaw processes and services.
 
     Returns a list of human-readable descriptions of what was found.
     An empty list means nothing was detected.
     """
-    found: List[str] = []
+    found: list[str] = []
 
     # -- systemd service (Linux) ------------------------------------------
     if sys.platform != "win32":
@@ -218,7 +216,7 @@ def _load_migration_module(script_path: Path):
     return mod
 
 
-def _find_openclaw_dirs() -> List[Path]:
+def _find_openclaw_dirs() -> list[Path]:
     """Find all OpenClaw directories on disk."""
     found = []
     for name in _OPENCLAW_DIR_NAMES:
@@ -228,12 +226,12 @@ def _find_openclaw_dirs() -> List[Path]:
     return found
 
 
-def _scan_workspace_state(source_dir: Path) -> List[Tuple[Path, str]]:
+def _scan_workspace_state(source_dir: Path) -> list[tuple[Path, str]]:
     """Scan an OpenClaw directory for workspace state files.
 
     Returns a list of (path, description) tuples.
     """
-    findings: List[Tuple[Path, str]] = []
+    findings: list[tuple[Path, str]] = []
 
     # Direct state files in the root
     for name in ("todo.json", "sessions", "logs"):

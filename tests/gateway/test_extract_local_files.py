@@ -14,14 +14,13 @@ from unittest.mock import patch
 import pytest
 
 from gateway.platforms.base import BasePlatformAdapter
-from typing import Set
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _extract(content: str, existing_files: Set[str] | None = None):
+def _extract(content: str, existing_files: set[str] | None = None):
     """
     Run extract_local_files with os.path.isfile mocked to return True
     for any path in *existing_files* (expanded form).  If *existing_files*

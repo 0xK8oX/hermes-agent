@@ -5,7 +5,6 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch, PropertyMock
 
 import pytest
-from typing import List
 
 
 # ---------------------------------------------------------------------------
@@ -248,7 +247,7 @@ class TestExecute:
 
         env.execute("echo hello")
         # The exec call should receive timeout= kwarg (SDK native timeout)
-        call_args = sb.process.exec.call_args_List[-1]
+        call_args = sb.process.exec.call_args_list[-1]
         assert call_args[1]["timeout"] == 42
         # The command should NOT have a shell `timeout` prefix
         cmd = call_args[0][0]
@@ -294,7 +293,7 @@ class TestExecute:
         env.execute("python3", stdin_data="print('hi')")
         # Check that the command passed to exec contains heredoc markers
         # Base class uses HERMES_STDIN_ prefix for heredoc delimiters
-        call_args = sb.process.exec.call_args_List[-1]
+        call_args = sb.process.exec.call_args_list[-1]
         cmd = call_args[0][0]
         assert "HERMES_STDIN_" in cmd
         assert "print" in cmd
@@ -313,7 +312,7 @@ class TestExecute:
 
         env.execute("pwd", cwd="/tmp")
         # CWD should be embedded in the command string via _wrap_command
-        call_args = sb.process.exec.call_args_List[-1]
+        call_args = sb.process.exec.call_args_list[-1]
         cmd = call_args[0][0]
         assert "cd /tmp" in cmd
         # CWD should NOT be passed as a kwarg to exec

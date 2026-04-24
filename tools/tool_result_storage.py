@@ -27,8 +27,6 @@ import os
 import shlex
 import uuid
 
-from typing import Optional, Tuple, List
-
 from tools.budget_config import (
     DEFAULT_PREVIEW_SIZE_CHARS,
     BudgetConfig,
@@ -59,7 +57,7 @@ def _resolve_storage_dir(env) -> str:
     return STORAGE_DIR
 
 
-def generate_preview(content: str, max_chars: int = DEFAULT_PREVIEW_SIZE_CHARS) -> Tuple[str, bool]:
+def generate_preview(content: str, max_chars: int = DEFAULT_PREVIEW_SIZE_CHARS) -> tuple[str, bool]:
     """Truncate at last newline within max_chars. Returns (preview, has_more)."""
     if len(content) <= max_chars:
         return content, False
@@ -121,7 +119,7 @@ def maybe_persist_tool_result(
     tool_use_id: str,
     env=None,
     config: BudgetConfig = DEFAULT_BUDGET,
-    threshold: int | Optional[float] = None,
+    threshold: int | float | None = None,
 ) -> str:
     """Layer 2: persist oversized result into the sandbox, return preview + path.
 
@@ -175,10 +173,10 @@ def maybe_persist_tool_result(
 
 
 def enforce_turn_budget(
-    tool_messages: List[dict],
+    tool_messages: list[dict],
     env=None,
     config: BudgetConfig = DEFAULT_BUDGET,
-) -> List[dict]:
+) -> list[dict]:
     """Layer 3: enforce aggregate budget across all tool results in a turn.
 
     If total chars exceed budget, persist the largest non-persisted results

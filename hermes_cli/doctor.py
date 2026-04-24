@@ -9,7 +9,6 @@ import sys
 import subprocess
 import shutil
 from pathlib import Path
-from typing import List, Tuple
 
 from hermes_cli.config import get_project_root, get_hermes_home, get_env_path
 from hermes_constants import display_hermes_home
@@ -74,8 +73,8 @@ def _system_package_install_cmd(pkg: str) -> str:
     return f"sudo apt install {pkg}"
 
 
-def _termux_browser_setup_steps(node_installed: bool) -> List[str]:
-    steps: List[str] = []
+def _termux_browser_setup_steps(node_installed: bool) -> list[str]:
+    steps: list[str] = []
     step = 1
     if not node_installed:
         steps.append(f"{step}) pkg install nodejs")
@@ -101,7 +100,7 @@ def _honcho_is_configured_for_doctor() -> bool:
         return False
 
 
-def _apply_doctor_tool_availability_overrides(available: List[str], unavailable: List[dict]) -> Tuple[List[str], List[dict]]:
+def _apply_doctor_tool_availability_overrides(available: list[str], unavailable: list[dict]) -> tuple[list[str], list[dict]]:
     """Adjust runtime-gated tool availability for doctor diagnostics."""
     if not _honcho_is_configured_for_doctor():
         return available, unavailable
@@ -130,7 +129,7 @@ def check_info(text: str):
     print(f"    {color('→', Colors.CYAN)} {text}")
 
 
-def _check_gateway_service_linger(issues: List[str]) -> None:
+def _check_gateway_service_linger(issues: list[str]) -> None:
     """Warn when a systemd user gateway service will stop after logout."""
     try:
         from hermes_cli.gateway import (

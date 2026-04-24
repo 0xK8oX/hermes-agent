@@ -18,7 +18,7 @@ import shutil
 import sys
 import copy
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any
 
 from hermes_cli.nous_subscription import get_nous_subscription_features
 from tools.tool_backend_helpers import managed_nous_tools_enabled
@@ -171,7 +171,7 @@ def is_interactive_stdin() -> bool:
         return False
 
 
-def print_noninteractive_setup_guidance(reason: Optional[str] = None) -> None:
+def print_noninteractive_setup_guidance(reason: str | None = None) -> None:
     """Print guidance for headless/non-interactive setup flows."""
     print()
     print(color("⚕ Hermes Setup — Non-interactive mode", Colors.CYAN, Colors.BOLD))
@@ -211,14 +211,14 @@ def prompt(question: str, default: str = None, password: bool = False) -> str:
         sys.exit(1)
 
 
-def _curses_prompt_choice(question: str, choices: list, default: int = 0, description: Optional[str] = None) -> int:
+def _curses_prompt_choice(question: str, choices: list, default: int = 0, description: str | None = None) -> int:
     """Single-select menu using curses. Delegates to curses_radiolist."""
     from hermes_cli.curses_ui import curses_radiolist
     return curses_radiolist(question, choices, selected=default, cancel_returns=-1, description=description)
 
 
 
-def prompt_choice(question: str, choices: list, default: int = 0, description: Optional[str] = None) -> int:
+def prompt_choice(question: str, choices: list, default: int = 0, description: str | None = None) -> int:
     """Prompt for a choice from a list with arrow key navigation.
 
     Escape keeps the current default (skips the question).
@@ -3080,7 +3080,7 @@ def run_setup_wizard(args):
     _offer_launch_chat()
 
 
-def _resolve_hermes_chat_argv() -> Optional[List[str]]:
+def _resolve_hermes_chat_argv() -> Optional[list[str]]:
     """Resolve argv for launching ``hermes chat`` in a fresh process."""
     hermes_bin = shutil.which("hermes")
     if hermes_bin:

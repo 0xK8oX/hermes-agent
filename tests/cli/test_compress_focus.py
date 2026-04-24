@@ -6,10 +6,9 @@ Inspired by Claude Code's /compact <focus> feature.
 from unittest.mock import MagicMock, patch
 
 from tests.cli.test_cli_init import _make_cli
-from typing import List, Dict
 
 
-def _make_history() -> List[Dict[str, str]]:
+def _make_history() -> list[dict[str, str]]:
     return [
         {"role": "user", "content": "one"},
         {"role": "assistant", "content": "two"},

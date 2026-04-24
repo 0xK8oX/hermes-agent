@@ -13,7 +13,7 @@ handler are thin wrappers that parse args and delegate.
 import json
 import shutil
 from pathlib import Path
-from typing import Any, Dict, Optional, List, Set
+from typing import Any, Dict, Optional
 
 from rich.console import Console
 from rich.panel import Panel
@@ -77,8 +77,8 @@ def _resolve_short_name(name: str, sources, console: Console) -> str:
     return ""
 
 
-def _format_extra_metadata_lines(extra: Dict[str, Any]) -> List[str]:
-    lines: List[str] = []
+def _format_extra_metadata_lines(extra: Dict[str, Any]) -> list[str]:
+    lines: list[str] = []
     if not extra:
         return lines
 
@@ -1371,12 +1371,12 @@ def _print_skills_help(console: Console) -> None:
         "  [cyan]search[/] <query>              Search registries for skills\n"
         "  [cyan]install[/] <identifier>        Install a skill (with security scan)\n"
         "  [cyan]inspect[/] <identifier>        Preview a skill without installing\n"
-        "  [cyan]List[/] [--source hub|builtin|local] List installed skills\n"
+        "  [cyan]list[/] [--source hub|builtin|local] List installed skills\n"
         "  [cyan]check[/] [name]                Check hub skills for upstream updates\n"
         "  [cyan]update[/] [name]               Update hub skills with upstream changes\n"
         "  [cyan]audit[/] [name]                Re-scan hub skills for security\n"
         "  [cyan]uninstall[/] <name>            Remove a hub-installed skill\n"
-        "  [cyan]reSet[/] <name> [--restore]    Reset bundled-skill tracking (fix 'user-modified' flag)\n"
+        "  [cyan]reset[/] <name> [--restore]    Reset bundled-skill tracking (fix 'user-modified' flag)\n"
         "  [cyan]publish[/] <path> --repo <r>   Publish a skill to GitHub via PR\n"
         "  [cyan]snapshot[/] export|import      Export/import skill configurations\n"
         "  [cyan]tap[/] list|add|remove         Manage skill sources\n",

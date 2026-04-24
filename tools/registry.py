@@ -20,7 +20,7 @@ import json
 import logging
 import threading
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Set, Tuple
+from typing import Callable, Dict, List, Optional, Set
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +109,7 @@ class ToolRegistry:
         # stable snapshots.
         self._lock = threading.RLock()
 
-    def _snapshot_state(self) -> Tuple[List[ToolEntry], Dict[str, Callable]]:
+    def _snapshot_state(self) -> tuple[List[ToolEntry], Dict[str, Callable]]:
         """Return a coherent snapshot of registry entries and toolset checks."""
         with self._lock:
             return list(self._tools.values()), dict(self._toolset_checks)
@@ -184,7 +184,7 @@ class ToolRegistry:
         is_async: bool = False,
         description: str = "",
         emoji: str = "",
-        max_result_size_chars: int | Optional[float] = None,
+        max_result_size_chars: int | float | None = None,
     ):
         """Register a tool.  Called at module-import time by each tool file."""
         with self._lock:
@@ -312,7 +312,7 @@ class ToolRegistry:
     # Query helpers  (replace redundant dicts in model_tools.py)
     # ------------------------------------------------------------------
 
-    def get_max_result_size(self, name: str, default: int | Optional[float] = None) -> int | float:
+    def get_max_result_size(self, name: str, default: int | float | None = None) -> int | float:
         """Return per-tool max result size, or *default* (or global default)."""
         entry = self.get_entry(name)
         if entry and entry.max_result_size_chars is not None:

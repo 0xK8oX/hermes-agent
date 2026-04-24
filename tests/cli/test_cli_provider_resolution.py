@@ -8,7 +8,6 @@ import pytest
 
 from hermes_cli.auth import AuthError
 from hermes_cli import main as hermes_main
-from typing import Tuple
 
 
 # ---------------------------------------------------------------------------
@@ -18,7 +17,7 @@ from typing import Tuple
 # mock patches that target "tools.file_tools._get_file_ops" etc.
 # ---------------------------------------------------------------------------
 
-def _reset_modules(prefixes: Tuple[str, ...]):
+def _reset_modules(prefixes: tuple[str, ...]):
     for name in list(sys.modules):
         if any(name == p or name.startswith(p + ".") for p in prefixes):
             sys.modules.pop(name, None)

@@ -8,7 +8,6 @@ mcp_config.py, and memory_setup.py.
 import getpass
 
 from hermes_cli.colors import Colors, color
-from typing import Optional
 
 
 # ─── Print Helpers ────────────────────────────────────────────────────────────
@@ -44,7 +43,7 @@ def print_header(text: str) -> None:
 
 def prompt(
     question: str,
-    default: Optional[str] = None,
+    default: str | None = None,
     password: bool = False,
 ) -> str:
     """Prompt the user for input with optional default and password masking.

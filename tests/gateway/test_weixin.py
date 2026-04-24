@@ -13,7 +13,6 @@ from gateway.platforms.base import SendResult
 from gateway.platforms import weixin
 from gateway.platforms.weixin import ContextTokenStore, WeixinAdapter
 from tools.send_message_tool import _parse_target_ref, _send_to_platform
-from typing import List
 
 
 def _make_adapter() -> WeixinAdapter:
@@ -354,8 +353,8 @@ class TestWeixinChunkDelivery:
         # 3 chunks, but chunk 2 fails once and retries → 4 _send_message calls total
         assert send_message_mock.await_count == 4
         # The retried chunk should reuse the same client_id for deduplication
-        first_try = send_message_mock.await_args_List[1].kwargs
-        retry = send_message_mock.await_args_List[2].kwargs
+        first_try = send_message_mock.await_args_list[1].kwargs
+        retry = send_message_mock.await_args_list[2].kwargs
         assert first_try["text"] == retry["text"]
         assert first_try["client_id"] == retry["client_id"]
 

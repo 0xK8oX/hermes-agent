@@ -35,7 +35,6 @@ import time
 import urllib.request
 
 from hermes_constants import get_hermes_home
-from typing import Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +93,7 @@ def _load_security_config() -> dict:
 
 # Cached path after first resolution (avoids repeated shutil.which per command).
 # _INSTALL_FAILED means "we tried and failed" — prevents retry on every command.
-_resolved_path: Optional[str] | bool = None
+_resolved_path: str | None | bool = None
 _INSTALL_FAILED = False  # sentinel: distinct from "not yet tried"
 _install_failure_reason: str = ""  # reason tag when _resolved_path is _INSTALL_FAILED
 
@@ -116,7 +115,7 @@ def _failure_marker_path() -> str:
     return os.path.join(_get_hermes_home(), ".tirith-install-failed")
 
 
-def _read_failure_reason() -> Optional[str]:
+def _read_failure_reason() -> str | None:
     """Read the failure reason from the disk marker.
 
     Returns the reason string, or None if the marker doesn't exist or is
@@ -182,7 +181,7 @@ def _hermes_bin_dir() -> str:
     return d
 
 
-def _detect_target() -> Optional[str]:
+def _detect_target() -> str | None:
     """Return the Rust target triple for the current platform, or None."""
     system = platform.system()
     machine = platform.machine().lower()
@@ -215,7 +214,7 @@ def _download_file(url: str, dest: str, timeout: int = 10):
         shutil.copyfileobj(resp, f)
 
 
-def _verify_cosign(checksums_path: str, sig_path: str, cert_path: str) -> Optional[bool]:
+def _verify_cosign(checksums_path: str, sig_path: str, cert_path: str) -> bool | None:
     """Verify cosign provenance signature on checksums.txt.
 
     Returns:
@@ -280,7 +279,7 @@ def _verify_checksum(archive_path: str, checksums_path: str, archive_name: str) 
     return True
 
 
-def _install_tirith(*, log_failures: bool = True) -> Tuple[Optional[str], str]:
+def _install_tirith(*, log_failures: bool = True) -> tuple[str | None, str]:
     """Download and install tirith to $HERMES_HOME/bin/tirith.
 
     Verifies provenance via cosign and SHA-256 checksum.

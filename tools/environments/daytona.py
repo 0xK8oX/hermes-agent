@@ -16,8 +16,6 @@ from tools.environments.base import (
     BaseEnvironment,
     _ThreadedProcessHandle,
 )
-from typing import Optional, Tuple, List
-
 from tools.environments.file_sync import (
     FileSyncManager,
     iter_sync_files,
@@ -148,7 +146,7 @@ class DaytonaEnvironment(BaseEnvironment):
         self._sandbox.process.exec(f"mkdir -p {parent}")
         self._sandbox.fs.upload_file(host_path, remote_path)
 
-    def _daytona_bulk_upload(self, files: List[Tuple[str, str]]) -> None:
+    def _daytona_bulk_upload(self, files: list[tuple[str, str]]) -> None:
         """Upload many files in a single HTTP call via Daytona SDK.
 
         Uses ``sandbox.fs.upload_files()`` which batches all files into one
@@ -186,7 +184,7 @@ class DaytonaEnvironment(BaseEnvironment):
         except Exception:
             pass  # best-effort cleanup
 
-    def _daytona_delete(self, remote_paths: List[str]) -> None:
+    def _daytona_delete(self, remote_paths: list[str]) -> None:
         """Batch-delete remote files via SDK exec."""
         self._sandbox.process.exec(quoted_rm_command(remote_paths))
 
@@ -209,7 +207,7 @@ class DaytonaEnvironment(BaseEnvironment):
 
     def _run_bash(self, cmd_string: str, *, login: bool = False,
                   timeout: int = 120,
-                  stdin_data: Optional[str] = None):
+                  stdin_data: str | None = None):
         """Return a _ThreadedProcessHandle wrapping a blocking Daytona SDK call."""
         sandbox = self._sandbox
         lock = self._lock
@@ -226,7 +224,7 @@ class DaytonaEnvironment(BaseEnvironment):
         else:
             shell_cmd = f"bash -c {shlex.quote(cmd_string)}"
 
-        def exec_fn() -> Tuple[str, int]:
+        def exec_fn() -> tuple[str, int]:
             response = sandbox.process.exec(shell_cmd, timeout=timeout)
             return (response.result or "", response.exit_code)
 

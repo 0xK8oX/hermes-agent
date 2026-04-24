@@ -112,8 +112,8 @@ def _build_patch_mode_content(patch_text: str) -> List[Any]:
         content: List[Any] = []
         for op in operations:
             if op.operation == OperationType.UPDATE:
-                old_chunks: List[str] = []
-                new_chunks: List[str] = []
+                old_chunks: list[str] = []
+                new_chunks: list[str] = []
                 for hunk in op.hunks:
                     old_lines = [line.content for line in hunk.lines if line.prefix in (" ", "-")]
                     new_lines = [line.content for line in hunk.lines if line.prefix in (" ", "+")]
@@ -178,8 +178,8 @@ def _parse_unified_diff_content(diff_text: str) -> List[Any]:
     content: List[Any] = []
     current_old_path: Optional[str] = None
     current_new_path: Optional[str] = None
-    old_lines: List[str] = []
-    new_lines: List[str] = []
+    old_lines: list[str] = []
+    new_lines: list[str] = []
 
     def _flush() -> None:
         nonlocal current_old_path, current_new_path, old_lines, new_lines

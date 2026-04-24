@@ -18,7 +18,7 @@ import os
 import sys
 import time
 import logging
-from typing import Optional, Tuple, List
+from typing import Optional, Tuple
 
 import requests
 
@@ -200,7 +200,7 @@ def render_qr_to_terminal(url: str) -> bool:
     # Use half-block characters for compact rendering (2 rows per character)
     matrix = qr.get_matrix()
     rows = len(matrix)
-    lines: List[str] = []
+    lines: list[str] = []
 
     TOP_HALF = "\u2580"      # ▀
     BOTTOM_HALF = "\u2584"   # ▄
@@ -208,7 +208,7 @@ def render_qr_to_terminal(url: str) -> bool:
     EMPTY = " "
 
     for r in range(0, rows, 2):
-        line_chars: List[str] = []
+        line_chars: list[str] = []
         for c in range(len(matrix[r])):
             top = matrix[r][c]
             bottom = matrix[r + 1][c] if r + 1 < rows else False

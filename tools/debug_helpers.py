@@ -26,7 +26,7 @@ import json
 import logging
 import os
 import uuid
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 from hermes_constants import get_hermes_home
 
@@ -45,7 +45,7 @@ class DebugSession:
         self.enabled = os.getenv(env_var, "false").lower() == "true"
         self.session_id = str(uuid.uuid4()) if self.enabled else ""
         self.log_dir = get_hermes_home() / "logs"
-        self._calls: List[Dict[str, Any]] = []
+        self._calls: list[Dict[str, Any]] = []
         self._start_time = datetime.datetime.now().isoformat() if self.enabled else ""
 
         if self.enabled:

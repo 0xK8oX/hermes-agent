@@ -11,7 +11,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 from gateway.platforms.base import ProcessingOutcome
-from typing import List
 
 try:
     import lark_oapi
@@ -1628,8 +1627,8 @@ class TestAdapterBehavior(unittest.TestCase):
         asyncio.run(_run())
 
         self.assertEqual(adapter.handle_message.await_count, 2)
-        first = adapter.handle_message.await_args_List[0].args[0]
-        second = adapter.handle_message.await_args_List[1].args[0]
+        first = adapter.handle_message.await_args_list[0].args[0]
+        second = adapter.handle_message.await_args_list[1].args[0]
         self.assertEqual(first.text, "A\nB")
         self.assertEqual(second.text, "C")
 

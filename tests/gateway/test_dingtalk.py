@@ -8,7 +8,6 @@ from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
 import pytest
 
 from gateway.config import Platform, PlatformConfig
-from typing import List
 
 
 # ---------------------------------------------------------------------------
@@ -806,7 +805,7 @@ class TestCardLifecycle:
         """reply_to distinguishes final response (base.py) from tool-progress
         sends (run.py).  Done must only fire for the former."""
         a = adapter_with_card
-        fired: List[str] = []
+        fired: list[str] = []
         a._fire_done_reaction = lambda cid: fired.append(cid)
 
         # Tool-progress / commentary path: no reply_to — no Done.
@@ -821,7 +820,7 @@ class TestCardLifecycle:
     async def test_edit_message_finalize_fires_done(self, adapter_with_card):
         """Stream consumer's final edit_message(finalize=True) fires Done."""
         a = adapter_with_card
-        fired: List[str] = []
+        fired: list[str] = []
         a._fire_done_reaction = lambda cid: fired.append(cid)
 
         await a.send("chat-1", "initial")

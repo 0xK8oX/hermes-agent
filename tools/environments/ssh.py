@@ -10,8 +10,6 @@ import tempfile
 from pathlib import Path
 
 from tools.environments.base import BaseEnvironment, _popen_bash
-from typing import Optional, Tuple, List
-
 from tools.environments.file_sync import (
     FileSyncManager,
     iter_sync_files,
@@ -78,7 +76,7 @@ class SSHEnvironment(BaseEnvironment):
 
         self.init_session()
 
-    def _build_ssh_command(self, extra_args: Optional[list] = None) -> list:
+    def _build_ssh_command(self, extra_args: list | None = None) -> list:
         cmd = ["ssh"]
         cmd.extend(["-o", f"ControlPath={self.control_socket}"])
         cmd.extend(["-o", "ControlMaster=auto"])
@@ -153,7 +151,7 @@ class SSHEnvironment(BaseEnvironment):
         if result.returncode != 0:
             raise RuntimeError(f"scp failed: {result.stderr.strip()}")
 
-    def _ssh_bulk_upload(self, files: List[Tuple[str, str]]) -> None:
+    def _ssh_bulk_upload(self, files: list[tuple[str, str]]) -> None:
         """Upload many files in a single tar-over-SSH stream.
 
         Pipes ``tar c`` on the local side through an SSH connection to
@@ -243,7 +241,7 @@ class SSHEnvironment(BaseEnvironment):
         if result.returncode != 0:
             raise RuntimeError(f"SSH bulk download failed: {result.stderr.decode(errors='replace').strip()}")
 
-    def _ssh_delete(self, remote_paths: List[str]) -> None:
+    def _ssh_delete(self, remote_paths: list[str]) -> None:
         """Batch-delete remote files in one SSH call."""
         cmd = self._build_ssh_command()
         cmd.append(quoted_rm_command(remote_paths))
@@ -261,7 +259,7 @@ class SSHEnvironment(BaseEnvironment):
 
     def _run_bash(self, cmd_string: str, *, login: bool = False,
                   timeout: int = 120,
-                  stdin_data: Optional[str] = None) -> subprocess.Popen:
+                  stdin_data: str | None = None) -> subprocess.Popen:
         """Spawn an SSH process that runs bash on the remote host."""
         cmd = self._build_ssh_command()
         if login:

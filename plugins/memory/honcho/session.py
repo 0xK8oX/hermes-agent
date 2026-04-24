@@ -8,7 +8,7 @@ import logging
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, TYPE_CHECKING, Optional, Tuple, List, Dict
+from typing import Any, TYPE_CHECKING
 
 from plugins.memory.honcho.client import get_honcho_client
 
@@ -34,10 +34,10 @@ class HonchoSession:
     user_peer_id: str  # Honcho peer ID for the user
     assistant_peer_id: str  # Honcho peer ID for the assistant
     honcho_session_id: str  # Honcho session ID
-    messages: List[Dict[str, Any]] = field(default_factory=list)
+    messages: list[dict[str, Any]] = field(default_factory=list)
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def add_message(self, role: str, content: str, **kwargs: Any) -> None:
         """Add a message to the local cache."""
@@ -50,7 +50,7 @@ class HonchoSession:
         self.messages.append(msg)
         self.updated_at = datetime.now()
 
-    def get_history(self, max_messages: int = 50) -> List[Dict[str, Any]]:
+    def get_history(self, max_messages: int = 50) -> list[dict[str, Any]]:
         """Get message history for LLM context."""
         recent = (
             self.messages[-max_messages:]
@@ -76,9 +76,9 @@ class HonchoSessionManager:
     def __init__(
         self,
         honcho: Honcho | None = None,
-        context_tokens: Optional[int] = None,
+        context_tokens: int | None = None,
         config: Any | None = None,
-        runtime_user_peer_name: Optional[str] = None,
+        runtime_user_peer_name: str | None = None,
     ):
         """
         Initialize the session manager.
@@ -94,9 +94,9 @@ class HonchoSessionManager:
         self._context_tokens = context_tokens
         self._config = config
         self._runtime_user_peer_name = runtime_user_peer_name
-        self._cache: Dict[str, HonchoSession] = {}
-        self._peers_cache: Dict[str, Any] = {}
-        self._sessions_cache: Dict[str, Any] = {}
+        self._cache: dict[str, HonchoSession] = {}
+        self._peers_cache: dict[str, Any] = {}
+        self._sessions_cache: dict[str, Any] = {}
 
         # Write frequency state
         write_frequency = (config.write_frequency if config else "async")
@@ -107,7 +107,7 @@ class HonchoSessionManager:
         # Dialectic results are cached on the plugin side (HonchoMemoryProvider
         # ._prefetch_result) so session-start prewarm and turn-driven fires share
         # one source of truth; see __init__.py _do_session_init for the prewarm.
-        self._context_cache: Dict[str, dict] = {}
+        self._context_cache: dict[str, dict] = {}
         self._prefetch_cache_lock = threading.Lock()
         self._dialectic_reasoning_level: str = (
             config.dialectic_reasoning_level if config else "low"
@@ -168,7 +168,7 @@ class HonchoSessionManager:
 
     def _get_or_create_honcho_session(
         self, session_id: str, user_peer: Any, assistant_peer: Any
-    ) -> Tuple[Any, list]:
+    ) -> tuple[Any, list]:
         """
         Get or create a Honcho session with peers configured.
 
@@ -499,7 +499,7 @@ class HonchoSessionManager:
 
     def dialectic_query(
         self, session_key: str, query: str,
-        reasoning_level: Optional[str] = None,
+        reasoning_level: str | None = None,
         peer: str = "user",
     ) -> str:
         """
@@ -562,7 +562,7 @@ class HonchoSessionManager:
             logger.warning("Honcho dialectic query failed: %s", e)
             return ""
 
-    def prefetch_context(self, session_key: str, user_message: Optional[str] = None) -> None:
+    def prefetch_context(self, session_key: str, user_message: str | None = None) -> None:
         """
         Fire get_prefetch_context in a background thread, caching the result.
 
@@ -577,14 +577,14 @@ class HonchoSessionManager:
         t = threading.Thread(target=_run, name="honcho-context-prefetch", daemon=True)
         t.start()
 
-    def set_context_result(self, session_key: str, result: Dict[str, str]) -> None:
+    def set_context_result(self, session_key: str, result: dict[str, str]) -> None:
         """Store a prefetched context result in a thread-safe way."""
         if not result:
             return
         with self._prefetch_cache_lock:
             self._context_cache[session_key] = result
 
-    def pop_context_result(self, session_key: str) -> Dict[str, str]:
+    def pop_context_result(self, session_key: str) -> dict[str, str]:
         """
         Return and clear the cached context result for this session.
 
@@ -593,7 +593,7 @@ class HonchoSessionManager:
         with self._prefetch_cache_lock:
             return self._context_cache.pop(session_key, {})
 
-    def get_prefetch_context(self, session_key: str, user_message: Optional[str] = None) -> Dict[str, str]:
+    def get_prefetch_context(self, session_key: str, user_message: str | None = None) -> dict[str, str]:
         """
         Pre-fetch user and AI peer context from Honcho.
 
@@ -615,7 +615,7 @@ class HonchoSessionManager:
         if not session:
             return {}
 
-        result: Dict[str, str] = {}
+        result: dict[str, str] = {}
 
         # Session summary — provides session-scoped context.
         # Fresh sessions (per-session cold start, or first-ever per-directory)
@@ -647,7 +647,7 @@ class HonchoSessionManager:
 
         return result
 
-    def migrate_local_history(self, session_key: str, messages: List[Dict[str, Any]]) -> bool:
+    def migrate_local_history(self, session_key: str, messages: list[dict[str, Any]]) -> bool:
         """
         Upload local session history to Honcho as a file.
 
@@ -689,7 +689,7 @@ class HonchoSessionManager:
             return False
 
     @staticmethod
-    def _format_migration_transcript(session_key: str, messages: List[Dict[str, Any]]) -> bytes:
+    def _format_migration_transcript(session_key: str, messages: list[dict[str, Any]]) -> bytes:
         """Format local messages as an XML transcript for Honcho file upload."""
         timestamps = [m.get("timestamp", "") for m in messages]
         time_range = f"{timestamps[0]} to {timestamps[-1]}" if timestamps else "unknown"
@@ -819,7 +819,7 @@ class HonchoSessionManager:
         return uploaded
 
     @staticmethod
-    def _normalize_card(card: Any) -> List[str]:
+    def _normalize_card(card: Any) -> list[str]:
         """Normalize Honcho card payloads into a plain list of strings."""
         if not card:
             return []
@@ -827,7 +827,7 @@ class HonchoSessionManager:
             return [str(item) for item in card if item]
         return [str(card)]
 
-    def _fetch_peer_card(self, peer_id: str, *, target: Optional[str] = None) -> List[str]:
+    def _fetch_peer_card(self, peer_id: str, *, target: str | None = None) -> list[str]:
         """Fetch a peer card directly from the peer object.
 
         This avoids relying on session.context(), which can return an empty
@@ -848,17 +848,17 @@ class HonchoSessionManager:
     def _fetch_peer_context(
         self,
         peer_id: str,
-        search_query: Optional[str] = None,
+        search_query: str | None = None,
         *,
-        target: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        target: str | None = None,
+    ) -> dict[str, Any]:
         """Fetch representation + peer card directly from a peer object."""
         peer = self._get_or_create_peer(peer_id)
         representation = ""
-        card: List[str] = []
+        card: list[str] = []
 
         try:
-            context_kwargs: Dict[str, Any] = {}
+            context_kwargs: dict[str, Any] = {}
             if target is not None:
                 context_kwargs["target"] = target
             if search_query is not None:
@@ -889,7 +889,7 @@ class HonchoSessionManager:
 
         return {"representation": representation, "card": card}
 
-    def get_session_context(self, session_key: str, peer: str = "user") -> Dict[str, Any]:
+    def get_session_context(self, session_key: str, peer: str = "user") -> dict[str, Any]:
         """Fetch full session context from Honcho including summary.
 
         Uses the session-level context() API which returns summary,
@@ -915,7 +915,7 @@ class HonchoSessionManager:
                 peer_perspective=session.user_peer_id if peer == "user" else session.assistant_peer_id,
             )
 
-            result: Dict[str, Any] = {}
+            result: dict[str, Any] = {}
 
             # Summary
             if ctx.summary:
@@ -940,7 +940,7 @@ class HonchoSessionManager:
             logger.debug("Session context fetch failed: %s", e)
             return {}
 
-    def _resolve_peer_id(self, session: HonchoSession, peer: Optional[str]) -> str:
+    def _resolve_peer_id(self, session: HonchoSession, peer: str | None) -> str:
         """Resolve a peer alias or explicit peer ID to a concrete Honcho peer ID.
 
         Always returns a non-empty string: either a known peer ID or a
@@ -961,8 +961,8 @@ class HonchoSessionManager:
     def _resolve_observer_target(
         self,
         session: HonchoSession,
-        peer: Optional[str],
-    ) -> Tuple[str, Optional[str]]:
+        peer: str | None,
+    ) -> tuple[str, str | None]:
         """Resolve observer and target peer IDs for context/search/profile queries."""
         target_peer_id = self._resolve_peer_id(session, peer)
 
@@ -974,7 +974,7 @@ class HonchoSessionManager:
 
         return target_peer_id, None
 
-    def get_peer_card(self, session_key: str, peer: str = "user") -> List[str]:
+    def get_peer_card(self, session_key: str, peer: str = "user") -> list[str]:
         """
         Fetch a peer card — a curated list of key facts.
 
@@ -1120,7 +1120,7 @@ class HonchoSessionManager:
             logger.error("Failed to delete conclusion %s: %s", conclusion_id, e)
             return False
 
-    def set_peer_card(self, session_key: str, card: List[str], peer: str = "user") -> Optional[List[str]]:
+    def set_peer_card(self, session_key: str, card: list[str], peer: str = "user") -> list[str] | None:
         """Update a peer's card.
 
         Args:
@@ -1192,7 +1192,7 @@ class HonchoSessionManager:
             logger.error("Failed to seed AI identity: %s", e)
             return False
 
-    def get_ai_representation(self, session_key: str) -> Dict[str, str]:
+    def get_ai_representation(self, session_key: str) -> dict[str, str]:
         """
         Fetch the AI peer's current Honcho representation.
 
@@ -1213,7 +1213,7 @@ class HonchoSessionManager:
             logger.debug("Failed to fetch AI representation: %s", e)
             return {"representation": "", "card": ""}
 
-    def list_sessions(self) -> List[Dict[str, Any]]:
+    def list_sessions(self) -> list[dict[str, Any]]:
         """List all cached sessions."""
         return [
             {

@@ -15,10 +15,9 @@ import pytest
 import gateway.run as gateway_run
 from gateway.platforms.base import MessageEvent, MessageType
 from tests.gateway.restart_test_helpers import make_restart_runner, make_restart_source
-from typing import Optional
 
 
-def _make_restart_event(update_id: Optional[int] = 100) -> MessageEvent:
+def _make_restart_event(update_id: int | None = 100) -> MessageEvent:
     return MessageEvent(
         text="/restart",
         message_type=MessageType.TEXT,

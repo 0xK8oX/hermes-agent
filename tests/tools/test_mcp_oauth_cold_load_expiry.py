@@ -38,7 +38,6 @@ import json
 import time
 
 import pytest
-from typing import Optional, Tuple, List
 
 
 pytest.importorskip("mcp.client.auth.oauth2", reason="MCP SDK 1.26.0+ required")
@@ -357,7 +356,7 @@ async def _noop_redirect(_url: str) -> None:
     return None
 
 
-async def _noop_callback() -> Tuple[str, Optional[str]]:
+async def _noop_callback() -> tuple[str, str | None]:
     raise AssertionError("callback handler should not be invoked in these tests")
 
 
@@ -509,7 +508,7 @@ async def test_initialize_skips_prefetch_when_no_tokens(tmp_path, monkeypatch):
     assert _HERMES_PROVIDER_CLS is not None
     reset_manager_for_tests()
 
-    calls: List[str] = []
+    calls: list[str] = []
 
     def mock_handler(request: httpx.Request) -> httpx.Response:
         calls.append(str(request.url))

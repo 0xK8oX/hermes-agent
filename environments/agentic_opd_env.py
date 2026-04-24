@@ -247,7 +247,7 @@ _HINT_RE = re.compile(r"\[HINT_START\](.*?)\[HINT_END\]", re.DOTALL)
 
 def _build_hint_judge_messages(
     response_text: str, next_state_text: str, next_state_role: str = "tool"
-) -> List[dict]:
+) -> list[dict]:
     """Build messages for the hint extraction judge."""
     user = (
         f"## Assistant response (turn t)\n{response_text}\n\n"
@@ -260,7 +260,7 @@ def _build_hint_judge_messages(
     ]
 
 
-def _parse_hint_result(text: str) -> Tuple[Optional[int], str]:
+def _parse_hint_result(text: str) -> tuple[int | None, str]:
     """Parse the judge's boxed decision and hint text."""
     boxed = _BOXED_RE.findall(text)
     score = int(boxed[-1]) if boxed else None
@@ -271,7 +271,7 @@ def _parse_hint_result(text: str) -> Tuple[Optional[int], str]:
     return score, hint
 
 
-def _select_best_hint(votes: List[dict]) -> Optional[dict]:
+def _select_best_hint(votes: list[dict]) -> dict | None:
     """Select the best hint from majority-voted judge results."""
     good = [
         v
@@ -285,7 +285,7 @@ def _select_best_hint(votes: List[dict]) -> Optional[dict]:
     return max(good, key=lambda v: len(v["hint"].strip()))
 
 
-def _append_hint_to_messages(messages: List[dict], hint: str) -> List[dict]:
+def _append_hint_to_messages(messages: list[dict], hint: str) -> list[dict]:
     """Clone messages and append hint to the last user message."""
     cloned = copy.deepcopy(messages)
     if not cloned:
@@ -436,17 +436,17 @@ class AgenticOPDEnv(HermesAgentBaseEnv):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._items: List[dict] = []
-        self._eval_items: List[dict] = []
+        self._items: list[dict] = []
+        self._eval_items: list[dict] = []
         self._index: int = 0
 
         # Metric buffers
-        self._reward_buffer: List[float] = []
-        self._correctness_buffer: List[float] = []
-        self._efficiency_buffer: List[float] = []
-        self._tool_usage_buffer: List[float] = []
-        self._hints_extracted_buffer: List[int] = []
-        self._opd_turns_scored_buffer: List[int] = []
+        self._reward_buffer: list[float] = []
+        self._correctness_buffer: list[float] = []
+        self._efficiency_buffer: list[float] = []
+        self._tool_usage_buffer: list[float] = []
+        self._hints_extracted_buffer: list[int] = []
+        self._opd_turns_scored_buffer: list[int] = []
 
     # ═══════════════════════════════════════════════════════════════════
     # 1. setup — load dataset
