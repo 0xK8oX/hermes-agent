@@ -223,13 +223,38 @@ def _dispatch_dir() -> Path:
     return d
 
 
+def _failed_dispatch_dir() -> Path:
+    """Return the dead-letter directory for permanently failed dispatches."""
+    d = _dispatch_dir() / "failed"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+_MAX_DISPATCH_RETRIES = 5
+_BACKOFF_BASE_SECONDS = 5
+
+
 def _write_dispatch_pending(entry: dict) -> None:
-    """Write a pending dispatch file for the gateway watcher to pick up."""
+    """Write a pending dispatch file atomically for the gateway watcher to pick up.
+
+    Uses temp-file + rename to avoid the watcher reading a partially-written file.
+    Embeds retry tracking metadata so the watcher can apply exponential backoff.
+    """
     d = _dispatch_dir()
     entry_id = entry.get("id", "unknown")
     pending_path = d / f"{entry_id}.json"
-    with open(pending_path, "w", encoding="utf-8") as f:
-        json.dump(entry, f, ensure_ascii=False)
+    tmp_path = d / f".{entry_id}.json.tmp"
+
+    payload = {
+        "entry": entry,
+        "_meta": {
+            "retries": 0,
+            "next_retry": time.time(),
+        },
+    }
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False)
+    os.replace(tmp_path, pending_path)
     logger.info("[Hall] Wrote pending dispatch file: %s", pending_path.name)
 
 
@@ -572,49 +597,126 @@ async def start_hall_dispatch_watcher(running_check: Callable[[], bool], interva
     agent tool), it writes a pending file to ``~/.hermes/hall_dispatch/``.
     This watcher scans that directory and executes the dispatch inside the
     gateway process where the runner is available.
+
+    Reliability features:
+    - Exponential backoff: retry interval grows 5s, 10s, 20s, 40s, 80s.
+    - Dead-letter queue: after 5 failed retries the file moves to ``failed/``.
+    - Atomic writes: pending files are written via temp+rename (no partial reads).
+    - Non-retryable errors (corrupted JSON, missing channel) are discarded immediately.
     """
-    await asyncio.sleep(15)  # initial delay — let the gateway fully start
+    # Short initial delay — adapters need a moment to connect, but 15s is too long
+    # for interactive use.  We also re-check on each loop, so a late-starting adapter
+    # will be picked up on the next scan.
+    await asyncio.sleep(3)
     logger.info("[Hall-Dispatch-Watcher] Started, scanning every %ds", interval)
 
     while running_check():
         try:
             dispatch_dir = _dispatch_dir()
             pending_files = sorted(dispatch_dir.glob("*.json"))
+            now = time.time()
 
             for pf in pending_files:
                 if not running_check():
                     return
+
+                # Skip temp files from atomic writes
+                if pf.name.startswith("."):
+                    continue
+
                 try:
-                    entry = json.loads(pf.read_text(encoding="utf-8"))
-                    to_soul = entry.get("to", "")
-                    target = _lookup_soul_channel(to_soul)
+                    payload = json.loads(pf.read_text(encoding="utf-8"))
+                except json.JSONDecodeError as e:
+                    logger.error("[Hall-Dispatch-Watcher] Corrupted file %s: %s — discarding", pf.name, e)
+                    pf.unlink(missing_ok=True)
+                    continue
 
-                    if not target:
-                        logger.warning(
-                            "[Hall-Dispatch-Watcher] No channel found for soul '%s', discarding",
-                            to_soul,
-                        )
-                        pf.unlink(missing_ok=True)
-                        continue
+                # Support both new wrapped format and legacy bare-entry format
+                if "entry" in payload:
+                    entry = payload["entry"]
+                    meta = payload.get("_meta", {})
+                else:
+                    entry = payload
+                    meta = {}
 
-                    logger.info(
-                        "[Hall-Dispatch-Watcher] Processing pending dispatch: %s → %s",
-                        entry.get("from", "?"), to_soul,
+                to_soul = entry.get("to", "")
+
+                # Exponential backoff: honour next_retry timestamp
+                next_retry = meta.get("next_retry", 0)
+                if now < next_retry:
+                    logger.debug(
+                        "[Hall-Dispatch-Watcher] Skipping %s (backoff until %.0f)",
+                        pf.name, next_retry,
                     )
+                    continue
+
+                retries = meta.get("retries", 0)
+                if retries >= _MAX_DISPATCH_RETRIES:
+                    # Move to dead-letter queue
+                    failed_path = _failed_dispatch_dir() / pf.name
+                    try:
+                        os.replace(pf, failed_path)
+                        logger.warning(
+                            "[Hall-Dispatch-Watcher] Max retries exceeded for %s → moved to %s",
+                            pf.name, failed_path,
+                        )
+                    except OSError:
+                        pf.unlink(missing_ok=True)
+                    continue
+
+                target = _lookup_soul_channel(to_soul)
+                if not target:
+                    logger.warning(
+                        "[Hall-Dispatch-Watcher] No channel found for soul '%s', discarding %s",
+                        to_soul, pf.name,
+                    )
+                    pf.unlink(missing_ok=True)
+                    continue
+
+                logger.info(
+                    "[Hall-Dispatch-Watcher] Processing pending dispatch (attempt %d/%d): %s → %s",
+                    retries + 1, _MAX_DISPATCH_RETRIES, entry.get("from", "?"), to_soul,
+                )
+
+                try:
                     # Run dispatch in thread pool to avoid blocking event loop
                     loop = asyncio.get_event_loop()
                     await loop.run_in_executor(None, _execute_dispatch, entry, target)
 
-                    # Only remove on successful dispatch
+                    # Success — remove pending file
                     pf.unlink(missing_ok=True)
-
-                except json.JSONDecodeError as e:
-                    logger.error("[Hall-Dispatch-Watcher] Corrupted file %s: %s — discarding", pf.name, e)
-                    pf.unlink(missing_ok=True)
+                    logger.info(
+                        "[Hall-Dispatch-Watcher] Dispatch succeeded: %s → %s",
+                        entry.get("from", "?"), to_soul,
+                    )
 
                 except Exception as e:
-                    logger.error("[Hall-Dispatch-Watcher] Dispatch failed for %s: %s — will retry", pf.name, e)
-                    # Keep file for retry on next scan
+                    retries += 1
+                    backoff = _BACKOFF_BASE_SECONDS * (2 ** (retries - 1))
+                    next_retry = time.time() + backoff
+
+                    # Rewrite file with updated metadata for next attempt
+                    updated_payload = {
+                        "entry": entry,
+                        "_meta": {
+                            "retries": retries,
+                            "next_retry": next_retry,
+                            "last_error": str(e)[:200],
+                        },
+                    }
+                    tmp_path = dispatch_dir / f".{pf.stem}.json.tmp"
+                    try:
+                        with open(tmp_path, "w", encoding="utf-8") as f:
+                            json.dump(updated_payload, f, ensure_ascii=False)
+                        os.replace(tmp_path, pf)
+                    except OSError:
+                        pass
+
+                    logger.error(
+                        "[Hall-Dispatch-Watcher] Dispatch failed for %s (attempt %d/%d), "
+                        "retry in %ds: %s",
+                        pf.name, retries, _MAX_DISPATCH_RETRIES, backoff, e,
+                    )
 
         except Exception as e:
             logger.error("[Hall-Dispatch-Watcher] Scan error: %s", e)

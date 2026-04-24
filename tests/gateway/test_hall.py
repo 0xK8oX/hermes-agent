@@ -351,7 +351,247 @@ class TestHallTool:
         assert "🗑️" in result
 
 
-# ── 4. Thread safety ───────────────────────────────────────────────
+# ── 4. Retry / Backoff / DLQ ───────────────────────────────────────
+
+
+class TestWriteDispatchPending:
+    """Verify atomic write and wrapped payload format."""
+
+    def test_writes_wrapped_payload_with_meta(self, temp_hall, tmp_path):
+        from gateway.extensions.hall import _write_dispatch_pending, _dispatch_dir
+        entry = {"id": "abc123", "to": "dev", "from": "pm"}
+        _write_dispatch_pending(entry)
+
+        dispatch_dir = _dispatch_dir()
+        files = list(dispatch_dir.glob("*.json"))
+        assert len(files) == 1
+        payload = json.loads(files[0].read_text(encoding="utf-8"))
+        assert payload["entry"] == entry
+        assert payload["_meta"]["retries"] == 0
+        assert isinstance(payload["_meta"]["next_retry"], (int, float))
+
+    def test_uses_atomic_temp_file(self, temp_hall, tmp_path):
+        from gateway.extensions.hall import _write_dispatch_pending, _dispatch_dir
+        entry = {"id": "xyz789", "to": "dev", "from": "pm"}
+        _write_dispatch_pending(entry)
+
+        dispatch_dir = _dispatch_dir()
+        # No temp files should remain
+        temp_files = list(dispatch_dir.glob(".*.tmp"))
+        assert temp_files == []
+
+
+class TestDispatchWatcherRetryBackoff:
+    """Verify exponential backoff, DLQ, and retry metadata rewrite."""
+
+    @pytest.mark.asyncio
+    async def test_skips_file_before_next_retry(self, temp_hall, tmp_path):
+        from gateway.extensions.hall import start_hall_dispatch_watcher, _dispatch_dir
+        dispatch_dir = _dispatch_dir()
+        # Write a file with next_retry in the future
+        future_retry = time.time() + 3600
+        payload = {
+            "entry": {"id": "r1", "to": "dev", "from": "pm"},
+            "_meta": {"retries": 1, "next_retry": future_retry},
+        }
+        pending = dispatch_dir / "r1.json"
+        pending.write_text(json.dumps(payload), encoding="utf-8")
+
+        call_count = [0]
+
+        def running():
+            call_count[0] += 1
+            return call_count[0] <= 2
+
+        with patch("gateway.extensions.hall._lookup_soul_channel") as mock_lookup:
+            await start_hall_dispatch_watcher(running, interval=1)
+            mock_lookup.assert_not_called()
+
+        # File should still exist (not processed, not deleted)
+        assert pending.exists()
+
+    @pytest.mark.asyncio
+    async def test_moves_to_dlq_after_max_retries(self, temp_hall, tmp_path):
+        from gateway.extensions.hall import start_hall_dispatch_watcher, _dispatch_dir, _failed_dispatch_dir, _MAX_DISPATCH_RETRIES
+        dispatch_dir = _dispatch_dir()
+        payload = {
+            "entry": {"id": "dlq1", "to": "dev", "from": "pm"},
+            "_meta": {"retries": _MAX_DISPATCH_RETRIES, "next_retry": 0},
+        }
+        pending = dispatch_dir / "dlq1.json"
+        pending.write_text(json.dumps(payload), encoding="utf-8")
+
+        call_count = [0]
+
+        def running():
+            call_count[0] += 1
+            return call_count[0] <= 2
+
+        await start_hall_dispatch_watcher(running, interval=1)
+
+        assert not pending.exists()
+        failed_path = _failed_dispatch_dir() / "dlq1.json"
+        assert failed_path.exists()
+
+    @pytest.mark.asyncio
+    async def test_success_removes_pending_file(self, temp_hall, tmp_path):
+        from gateway.extensions.hall import start_hall_dispatch_watcher, _dispatch_dir
+        dispatch_dir = _dispatch_dir()
+        payload = {
+            "entry": {"id": "ok1", "to": "dev", "from": "pm"},
+            "_meta": {"retries": 0, "next_retry": 0},
+        }
+        pending = dispatch_dir / "ok1.json"
+        pending.write_text(json.dumps(payload), encoding="utf-8")
+
+        call_count = [0]
+
+        def running():
+            call_count[0] += 1
+            return call_count[0] <= 2
+
+        with patch("gateway.extensions.hall._lookup_soul_channel", return_value={"platform": "telegram", "chat_id": "123"}):
+            with patch("gateway.extensions.hall._execute_dispatch") as mock_exec:
+                await start_hall_dispatch_watcher(running, interval=1)
+                mock_exec.assert_called_once()
+
+        assert not pending.exists()
+
+    @pytest.mark.asyncio
+    async def test_failure_rewrites_retry_metadata(self, temp_hall, tmp_path):
+        from gateway.extensions.hall import start_hall_dispatch_watcher, _dispatch_dir
+        dispatch_dir = _dispatch_dir()
+        payload = {
+            "entry": {"id": "fail1", "to": "dev", "from": "pm"},
+            "_meta": {"retries": 0, "next_retry": 0},
+        }
+        pending = dispatch_dir / "fail1.json"
+        pending.write_text(json.dumps(payload), encoding="utf-8")
+
+        call_count = [0]
+
+        def running():
+            call_count[0] += 1
+            return call_count[0] <= 2
+
+        with patch("gateway.extensions.hall._lookup_soul_channel", return_value={"platform": "telegram", "chat_id": "123"}):
+            with patch("gateway.extensions.hall._execute_dispatch", side_effect=RuntimeError("boom")):
+                await start_hall_dispatch_watcher(running, interval=1)
+
+        # File should still exist with updated metadata
+        assert pending.exists()
+        updated = json.loads(pending.read_text(encoding="utf-8"))
+        assert updated["_meta"]["retries"] == 1
+        assert updated["_meta"]["next_retry"] > time.time()  # future
+        assert "boom" in updated["_meta"]["last_error"]
+
+    @pytest.mark.asyncio
+    async def test_backoff_interval_doubles(self, temp_hall, tmp_path):
+        from gateway.extensions.hall import start_hall_dispatch_watcher, _dispatch_dir
+        dispatch_dir = _dispatch_dir()
+        # Start with retries=2, expect next_retry = now + 5 * 2^2 = now + 20
+        now = time.time()
+        payload = {
+            "entry": {"id": "back1", "to": "dev", "from": "pm"},
+            "_meta": {"retries": 2, "next_retry": 0},
+        }
+        pending = dispatch_dir / "back1.json"
+        pending.write_text(json.dumps(payload), encoding="utf-8")
+
+        call_count = [0]
+
+        def running():
+            call_count[0] += 1
+            return call_count[0] <= 2
+
+        with patch("gateway.extensions.hall._lookup_soul_channel", return_value={"platform": "telegram", "chat_id": "123"}):
+            with patch("gateway.extensions.hall._execute_dispatch", side_effect=RuntimeError("boom")):
+                await start_hall_dispatch_watcher(running, interval=1)
+
+        updated = json.loads(pending.read_text(encoding="utf-8"))
+        assert updated["_meta"]["retries"] == 3
+        # Backoff = 5 * 2^(3-1) = 20 seconds
+        expected_min = now + 15
+        assert updated["_meta"]["next_retry"] >= expected_min
+
+    @pytest.mark.asyncio
+    async def test_discards_corrupted_json(self, temp_hall, tmp_path):
+        from gateway.extensions.hall import start_hall_dispatch_watcher, _dispatch_dir
+        dispatch_dir = _dispatch_dir()
+        pending = dispatch_dir / "bad.json"
+        pending.write_text("not json at all", encoding="utf-8")
+
+        call_count = [0]
+
+        def running():
+            call_count[0] += 1
+            return call_count[0] <= 2
+
+        await start_hall_dispatch_watcher(running, interval=1)
+        assert not pending.exists()
+
+    @pytest.mark.asyncio
+    async def test_discards_missing_channel(self, temp_hall, tmp_path):
+        from gateway.extensions.hall import start_hall_dispatch_watcher, _dispatch_dir
+        dispatch_dir = _dispatch_dir()
+        payload = {
+            "entry": {"id": "nochan", "to": "ghost", "from": "pm"},
+            "_meta": {"retries": 0, "next_retry": 0},
+        }
+        pending = dispatch_dir / "nochan.json"
+        pending.write_text(json.dumps(payload), encoding="utf-8")
+
+        call_count = [0]
+
+        def running():
+            call_count[0] += 1
+            return call_count[0] <= 2
+
+        with patch("gateway.extensions.hall._lookup_soul_channel", return_value=None):
+            await start_hall_dispatch_watcher(running, interval=1)
+
+        assert not pending.exists()
+
+    @pytest.mark.asyncio
+    async def test_skips_temp_files(self, temp_hall, tmp_path):
+        from gateway.extensions.hall import start_hall_dispatch_watcher, _dispatch_dir
+        dispatch_dir = _dispatch_dir()
+        temp_file = dispatch_dir / ".something.json.tmp"
+        temp_file.write_text("{}", encoding="utf-8")
+
+        call_count = [0]
+
+        def running():
+            call_count[0] += 1
+            return call_count[0] <= 2
+
+        await start_hall_dispatch_watcher(running, interval=1)
+        # Temp file should still exist (not processed, not deleted)
+        assert temp_file.exists()
+
+    @pytest.mark.asyncio
+    async def test_supports_legacy_bare_entry_format(self, temp_hall, tmp_path):
+        from gateway.extensions.hall import start_hall_dispatch_watcher, _dispatch_dir
+        dispatch_dir = _dispatch_dir()
+        # Legacy format: just the entry dict, no wrapper
+        pending = dispatch_dir / "legacy.json"
+        pending.write_text(json.dumps({"id": "legacy", "to": "dev", "from": "pm"}), encoding="utf-8")
+
+        call_count = [0]
+
+        def running():
+            call_count[0] += 1
+            return call_count[0] <= 2
+
+        with patch("gateway.extensions.hall._lookup_soul_channel", return_value={"platform": "telegram", "chat_id": "123"}):
+            with patch("gateway.extensions.hall._execute_dispatch") as mock_exec:
+                await start_hall_dispatch_watcher(running, interval=1)
+                mock_exec.assert_called_once()
+
+        assert not pending.exists()
+
+
+# ── 5. Thread safety ───────────────────────────────────────────────
 
 
 class TestHallThreadSafety:
