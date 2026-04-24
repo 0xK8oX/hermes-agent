@@ -3079,8 +3079,12 @@ def call_llm(
         # Only try alternative providers when the user didn't explicitly
         # configure this task's provider.  Explicit provider = hard constraint;
         # auto (the default) = best-effort fallback chain.  (#7559)
+        # Exception: custom providers (e.g. local proxies) should fallback on
+        # connection errors since the endpoint may be temporarily unreachable.
         is_auto = resolved_provider in ("auto", "", None)
-        if should_fallback and is_auto:
+        is_custom_provider = bool(resolved_provider and str(resolved_provider).startswith("custom:"))
+        allow_fallback = is_auto or (is_custom_provider and _is_connection_error(first_err))
+        if should_fallback and allow_fallback:
             reason = (
                 "payment error"
                 if _is_payment_error(first_err)
@@ -3325,7 +3329,9 @@ async def async_call_llm(
             or _is_rate_limit_or_overload_error(first_err)
         )
         is_auto = resolved_provider in ("auto", "", None)
-        if should_fallback and is_auto:
+        is_custom_provider = bool(resolved_provider and str(resolved_provider).startswith("custom:"))
+        allow_fallback = is_auto or (is_custom_provider and _is_connection_error(first_err))
+        if should_fallback and allow_fallback:
             reason = (
                 "payment error"
                 if _is_payment_error(first_err)
