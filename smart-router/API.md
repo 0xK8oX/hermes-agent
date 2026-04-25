@@ -230,6 +230,56 @@ GET /v1/health?plan=<slug>
 
 ---
 
+## Key Management
+
+API keys are stored **encrypted in D1** using AES-256-GCM. The master encryption key (`KEY_ENCRYPTION_KEY`) is the only secret kept in Wrangler secrets.
+
+### List Keys (names only)
+
+```
+GET /v1/keys
+```
+
+**Response:**
+```json
+{
+  "keys": ["kato-glm", "kato-kimi", "volcengine", "minimax"]
+}
+```
+
+### Store a Key
+
+```
+POST /v1/keys
+Content-Type: application/json
+```
+
+**Request body:**
+```json
+{
+  "provider_name": "kato-glm",
+  "api_key": "sk-..."
+}
+```
+
+**Response (200):**
+```json
+{"ok": true, "provider_name": "kato-glm"}
+```
+
+### Delete a Key
+
+```
+DELETE /v1/keys/:provider_name
+```
+
+**Response (200):**
+```json
+{"ok": true, "provider_name": "kato-glm"}
+```
+
+---
+
 ## Error Responses
 
 ### Plan Not Found
@@ -273,22 +323,19 @@ curl -X POST http://localhost:8790/v1/plans \
   }'
 ```
 
-### 2. Add the API key to Wrangler secrets
+### 2. Store the encrypted API keys
 
 ```bash
-cd smart-router
-wrangler secret put PROVIDER_KEY_KATO_GLM
-# paste the key
+curl -X POST http://localhost:8790/v1/keys \
+  -H "Content-Type: application/json" \
+  -d '{"provider_name": "kato-glm", "api_key": "sk-..."}'
 
-wrangler secret put PROVIDER_KEY_KATO_KIMI
-# paste the key
+curl -X POST http://localhost:8790/v1/keys \
+  -H "Content-Type: application/json" \
+  -d '{"provider_name": "kato-kimi", "api_key": "sk-..."}'
 ```
 
-For local dev, add to `.dev.vars`:
-```
-PROVIDER_KEY_KATO_GLM=sk-...
-PROVIDER_KEY_KATO_KIMI=sk-...
-```
+Keys are encrypted with AES-256-GCM before storage. Even if the D1 database leaks, keys remain unusable without the master `KEY_ENCRYPTION_KEY` (stored in Wrangler secrets).
 
 ### 3. Test it
 
