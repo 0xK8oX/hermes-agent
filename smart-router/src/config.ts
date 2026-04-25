@@ -1,12 +1,13 @@
 /**
  * Smart Router - Config loading
  *
- * Resolves API keys from Wrangler secrets.
- * Plan configurations are fetched from the D1 database at runtime.
+ * Plan configurations and encrypted API keys are fetched from D1 at runtime.
+ * Master encryption key (KEY_ENCRYPTION_KEY) stays in Wrangler secrets.
  */
 
 import type { ProviderConfig } from "./types";
-import { getPlan as dbGetPlan } from "./db";
+import { getPlan as dbGetPlan, getEncryptedKey } from "./db";
+import { decryptKey } from "./crypto";
 
 /**
  * Get a plan by name from D1.
@@ -24,16 +25,19 @@ export async function getPlan(
 }
 
 /**
- * Resolve the API key for a provider from Wrangler secrets.
- * Secret name pattern: PROVIDER_KEY_<UPPERCASE_PROVIDER_NAME>
+ * Resolve the API key for a provider from D1 (decrypted on-the-fly).
  */
-export function getProviderKey(providerName: string, env: Env): string | null {
-  const secretName = `PROVIDER_KEY_${providerName.toUpperCase().replace(/[^A-Z0-9]/g, "_")}`;
-  const key = (env as unknown as Record<string, unknown>)[secretName];
-  if (typeof key === "string" && key.length > 0) {
-    return key;
+export async function getProviderKey(
+  providerName: string,
+  env: Env
+): Promise<string | null> {
+  const encrypted = await getEncryptedKey(env.DB, providerName.toLowerCase());
+  if (!encrypted) return null;
+  try {
+    return await decryptKey(encrypted, env);
+  } catch {
+    return null;
   }
-  return null;
 }
 
 /**

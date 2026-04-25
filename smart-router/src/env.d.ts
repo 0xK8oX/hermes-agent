@@ -5,6 +5,7 @@
 declare interface Env {
   HEALTH_TRACKER: DurableObjectNamespace;
   DB: D1Database;
+  KEY_ENCRYPTION_KEY: string;
 }
 
 declare module "*.json" {

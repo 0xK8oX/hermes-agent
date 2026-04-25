@@ -12,12 +12,29 @@
  *   GET    /v1/plans/:slug     (Get a specific plan)
  *   PUT    /v1/plans/:slug     (Update a plan)
  *   DELETE /v1/plans/:slug     (Delete a plan)
+ *
+ * Key Management:
+ *   GET    /v1/keys            (List provider names that have keys)
+ *   POST   /v1/keys            (Store an encrypted API key)
+ *   DELETE /v1/keys/:provider  (Delete a key)
  */
 
 import { HealthTracker } from "./health-do";
 import { routeRequest } from "./router";
 import type { ClientFormat } from "./types";
-import { initDb, seedPlansIfEmpty, listPlans, getPlan, upsertPlan, deletePlan } from "./db";
+import {
+  initDb,
+  seedPlansIfEmpty,
+  listPlans,
+  getPlan,
+  upsertPlan,
+  deletePlan,
+  setEncryptedKey,
+  deleteKey,
+  listKeys,
+  migrateKeysFromEnv,
+} from "./db";
+import { encryptKey } from "./crypto";
 
 export { HealthTracker };
 
@@ -35,6 +52,7 @@ async function ensureDb(env: Env): Promise<void> {
   if (dbInitialized) return;
   await initDb(env.DB);
   await seedPlansIfEmpty(env.DB);
+  await migrateKeysFromEnv(env.DB, env, encryptKey);
   dbInitialized = true;
 }
 
@@ -71,6 +89,21 @@ export default {
       if (request.method === "DELETE") {
         return handleDeletePlan(slug, env);
       }
+    }
+
+    // ── Key Management API ───────────────────────────────────────────────
+    if (path === "/v1/keys") {
+      if (request.method === "GET") {
+        return handleListKeys(env);
+      }
+      if (request.method === "POST") {
+        return handleStoreKey(request, env);
+      }
+    }
+
+    const keyMatch = path.match(/^\/v1\/keys\/([^/]+)$/);
+    if (keyMatch && request.method === "DELETE") {
+      return handleDeleteKey(decodeURIComponent(keyMatch[1]), env);
     }
 
     // ── Health check endpoint ────────────────────────────────────────────
@@ -187,6 +220,57 @@ async function handleUpdatePlan(
 async function handleDeletePlan(slug: string, env: Env): Promise<Response> {
   await deletePlan(env.DB, slug);
   return new Response(JSON.stringify({ ok: true, slug }), {
+    headers: { ...corsHeaders(), "Content-Type": "application/json" },
+  });
+}
+
+// ── Key Management Handlers ──────────────────────────────────────────────
+
+async function handleListKeys(env: Env): Promise<Response> {
+  const names = await listKeys(env.DB);
+  return new Response(JSON.stringify({ keys: names }), {
+    headers: { ...corsHeaders(), "Content-Type": "application/json" },
+  });
+}
+
+async function handleStoreKey(request: Request, env: Env): Promise<Response> {
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return new Response(JSON.stringify({ error: "Invalid JSON body" }), {
+      status: 400,
+      headers: { ...corsHeaders(), "Content-Type": "application/json" },
+    });
+  }
+
+  const providerName = (body as Record<string, unknown>)?.provider_name as string | undefined;
+  const apiKey = (body as Record<string, unknown>)?.api_key as string | undefined;
+
+  if (!providerName || !apiKey) {
+    return new Response(
+      JSON.stringify({ error: "Missing provider_name or api_key" }),
+      { status: 400, headers: { ...corsHeaders(), "Content-Type": "application/json" } }
+    );
+  }
+
+  try {
+    const encrypted = await encryptKey(apiKey, env);
+    await setEncryptedKey(env.DB, providerName.toLowerCase(), encrypted);
+    return new Response(JSON.stringify({ ok: true, provider_name: providerName }), {
+      headers: { ...corsHeaders(), "Content-Type": "application/json" },
+    });
+  } catch (err) {
+    return new Response(
+      JSON.stringify({ error: `Encryption failed: ${err instanceof Error ? err.message : String(err)}` }),
+      { status: 500, headers: { ...corsHeaders(), "Content-Type": "application/json" } }
+    );
+  }
+}
+
+async function handleDeleteKey(providerName: string, env: Env): Promise<Response> {
+  await deleteKey(env.DB, providerName.toLowerCase());
+  return new Response(JSON.stringify({ ok: true, provider_name: providerName }), {
     headers: { ...corsHeaders(), "Content-Type": "application/json" },
   });
 }

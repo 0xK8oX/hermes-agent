@@ -123,7 +123,7 @@ export async function routeRequest(
 
   // 2. Try each healthy provider
   for (const provider of healthyProviders) {
-    const apiKey = getProviderKey(provider.name, env);
+    const apiKey = await getProviderKey(provider.name, env);
     if (!apiKey) {
       errors.push({ provider: provider.name, status: 0, message: "Missing API key" });
       continue;
