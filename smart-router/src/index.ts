@@ -15,11 +15,11 @@
  */
 
 import { HealthTracker } from "./health-do";
-import { PlanStore } from "./plan-store-do";
 import { routeRequest } from "./router";
 import type { ClientFormat } from "./types";
+import { initDb, seedPlansIfEmpty, listPlans, getPlan, upsertPlan, deletePlan } from "./db";
 
-export { HealthTracker, PlanStore };
+export { HealthTracker };
 
 function corsHeaders(): Record<string, string> {
   return {
@@ -29,11 +29,22 @@ function corsHeaders(): Record<string, string> {
   };
 }
 
+let dbInitialized = false;
+
+async function ensureDb(env: Env): Promise<void> {
+  if (dbInitialized) return;
+  await initDb(env.DB);
+  await seedPlansIfEmpty(env.DB);
+  dbInitialized = true;
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     if (request.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: corsHeaders() });
     }
+
+    await ensureDb(env);
 
     const url = new URL(request.url);
     const path = url.pathname;
@@ -94,11 +105,8 @@ export default {
 // ── Plan Management Handlers ─────────────────────────────────────────────
 
 async function handleListPlans(env: Env): Promise<Response> {
-  const id = env.PLAN_STORE.idFromName("global");
-  const stub = env.PLAN_STORE.get(id);
-  const res = await stub.fetch("https://fake-host/plans", { method: "GET" });
-  return new Response(res.body, {
-    status: res.status,
+  const plans = await listPlans(env.DB);
+  return new Response(JSON.stringify(plans), {
     headers: { ...corsHeaders(), "Content-Type": "application/json" },
   });
 }
@@ -126,29 +134,22 @@ async function handleCreatePlan(request: Request, env: Env): Promise<Response> {
     );
   }
 
-  const id = env.PLAN_STORE.idFromName("global");
-  const stub = env.PLAN_STORE.get(id);
-  const res = await stub.fetch("https://fake-host/plans", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ slug, config }),
-  });
+  await upsertPlan(env.DB, slug, config as unknown as import("./types").PlanConfig);
 
-  return new Response(res.body, {
-    status: res.status,
+  return new Response(JSON.stringify({ ok: true, slug }), {
     headers: { ...corsHeaders(), "Content-Type": "application/json" },
   });
 }
 
 async function handleGetPlan(slug: string, env: Env): Promise<Response> {
-  const id = env.PLAN_STORE.idFromName("global");
-  const stub = env.PLAN_STORE.get(id);
-  const res = await stub.fetch(
-    `https://fake-host/plans/${encodeURIComponent(slug)}`,
-    { method: "GET" }
-  );
-  return new Response(res.body, {
-    status: res.status,
+  const config = await getPlan(env.DB, slug);
+  if (!config) {
+    return new Response(JSON.stringify({ error: "Plan not found" }), {
+      status: 404,
+      headers: { ...corsHeaders(), "Content-Type": "application/json" },
+    });
+  }
+  return new Response(JSON.stringify(config), {
     headers: { ...corsHeaders(), "Content-Type": "application/json" },
   });
 }
@@ -176,32 +177,16 @@ async function handleUpdatePlan(
     );
   }
 
-  const id = env.PLAN_STORE.idFromName("global");
-  const stub = env.PLAN_STORE.get(id);
-  const res = await stub.fetch(
-    `https://fake-host/plans/${encodeURIComponent(slug)}`,
-    {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(config),
-    }
-  );
+  await upsertPlan(env.DB, slug, config as unknown as import("./types").PlanConfig);
 
-  return new Response(res.body, {
-    status: res.status,
+  return new Response(JSON.stringify({ ok: true, slug }), {
     headers: { ...corsHeaders(), "Content-Type": "application/json" },
   });
 }
 
 async function handleDeletePlan(slug: string, env: Env): Promise<Response> {
-  const id = env.PLAN_STORE.idFromName("global");
-  const stub = env.PLAN_STORE.get(id);
-  const res = await stub.fetch(
-    `https://fake-host/plans/${encodeURIComponent(slug)}`,
-    { method: "DELETE" }
-  );
-  return new Response(res.body, {
-    status: res.status,
+  await deletePlan(env.DB, slug);
+  return new Response(JSON.stringify({ ok: true, slug }), {
     headers: { ...corsHeaders(), "Content-Type": "application/json" },
   });
 }

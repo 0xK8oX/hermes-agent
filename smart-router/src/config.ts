@@ -2,48 +2,25 @@
  * Smart Router - Config loading
  *
  * Resolves API keys from Wrangler secrets.
- * Plan configurations are fetched from the PlanStore Durable Object at runtime.
+ * Plan configurations are fetched from the D1 database at runtime.
  */
 
 import type { ProviderConfig } from "./types";
+import { getPlan as dbGetPlan } from "./db";
 
 /**
- * Get a plan by name from the PlanStore DO.
+ * Get a plan by name from D1.
  * Falls back to "default" if not found.
  */
 export async function getPlan(
   env: Env,
   name: string
 ): Promise<{ providers: ProviderConfig[] } | null> {
-  const id = env.PLAN_STORE.idFromName("global");
-  const stub = env.PLAN_STORE.get(id);
-
-  try {
-    const res = await stub.fetch(
-      `https://fake-host/plans/${encodeURIComponent(name)}`,
-      { method: "GET" }
-    );
-    if (res.ok) {
-      return (await res.json()) as { providers: ProviderConfig[] };
-    }
-  } catch {
-    // fall through
+  let plan = await dbGetPlan(env.DB, name);
+  if (!plan) {
+    plan = await dbGetPlan(env.DB, "default");
   }
-
-  // Fallback to "default"
-  try {
-    const res = await stub.fetch(
-      `https://fake-host/plans/default`,
-      { method: "GET" }
-    );
-    if (res.ok) {
-      return (await res.json()) as { providers: ProviderConfig[] };
-    }
-  } catch {
-    // fall through
-  }
-
-  return null;
+  return plan;
 }
 
 /**
