@@ -1272,44 +1272,175 @@ def _normalize_main_runtime(main_runtime: Optional[Dict[str, Any]]) -> Dict[str,
     return normalized
 
 
-_cached_fallback_providers: Optional[List[Dict[str, str]]] = None
+_cached_fallback_providers: Optional[Dict[str, List[Dict[str, str]]]] = None
+
+# Mapping of compact fallback aliases to env vars.
+# Format in config.yaml: "kimi:k2p6:1"  -> provider:model:key_index
+_FALLBACK_ALIASES: Dict[str, Dict[str, Any]] = {
+    "kimi": {
+        "base_url_env": "KIMI_CODING_URL",
+        "api_key_envs": ["KIMI_API_KEY", "KIMI_API_KEY_2"],
+    },
+    "minimax": {
+        "base_url_env": "MINIMAX_ANTHROPIC_URL",
+        "api_key_envs": ["MINIMAX_API_KEY"],
+    },
+    "volcengine": {
+        "base_url_env": "VOLCENGINE_OPENAI_URL",
+        "api_key_envs": ["VOLCENGINE_API_KEY", "VOLCENGINE_API_KEY_2"],
+    },
+    "glm": {
+        "base_url_env": "GLM_CODING_URL",
+        "api_key_envs": ["GLM_API_KEY"],
+    },
+    "openrouter": {
+        "base_url": "http://localhost:23000/v1",
+        "api_key": "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",
+    },
+}
 
 
-def _load_fallback_providers() -> List[Dict[str, str]]:
-    """Load fallback_providers from config.yaml (cached per process)."""
+def _expand_fallback_entry(entry: Any) -> Optional[Dict[str, str]]:
+    """Expand a fallback entry from compact string or dict to a normalised dict.
+
+    Compact string format: ``provider:model:key_index``
+      - provider: alias from _FALLBACK_ALIASES or custom provider name
+      - model:    model slug (optional)
+      - key_index: 1-based index into the alias's api_key_envs list (optional, defaults to 1)
+
+    Examples:
+      - "kimi:k2p6:1"        -> kimi provider, k2p6 model, first key
+      - "kimi:k2p6"          -> same, key_index defaults to 1
+      - "volcengine:ark-code-latest:2" -> volcengine, ark-code-latest, second key
+      - "minimax:minimax2.7" -> minimax, minimax2.7, first key
+      - "glm:glm-5.1"        -> glm, glm-5.1, first key
+      - "Open.bigmodel.cn:glm-5.1" -> lookup custom_providers by name
+
+    Dict entries are returned unchanged.
+    """
+    if isinstance(entry, dict):
+        return entry
+    if not isinstance(entry, str):
+        return None
+    parts = entry.split(":")
+    if len(parts) < 1:
+        return None
+
+    alias = parts[0].strip()
+    model = parts[1].strip() if len(parts) > 1 else ""
+    key_idx = 1
+    if len(parts) > 2:
+        try:
+            key_idx = max(1, int(parts[2].strip()))
+        except ValueError:
+            key_idx = 1
+
+    # Try known aliases first
+    spec = _FALLBACK_ALIASES.get(alias)
+    if spec:
+        base_url = spec.get("base_url") or os.getenv(spec.get("base_url_env", ""), "").strip()
+        api_key_envs = spec.get("api_key_envs", [])
+        api_key = spec.get("api_key")
+        if api_key is None and api_key_envs:
+            idx = min(key_idx - 1, len(api_key_envs) - 1)
+            api_key = os.getenv(api_key_envs[idx], "").strip()
+        if not base_url or not api_key:
+            logger.debug("Compact fallback alias %s missing base_url or api_key", alias)
+            return None
+        return {
+            "provider": alias,
+            "model": model or "",
+            "base_url": base_url,
+            "api_key": api_key,
+        }
+
+    # Unknown alias -> treat as custom provider name lookup (model is required)
+    try:
+        from hermes_cli.runtime_provider import _get_named_custom_provider
+        custom = _get_named_custom_provider(alias)
+        if custom:
+            return {
+                "provider": alias,
+                "model": model or custom.get("model", ""),
+                "base_url": custom.get("base_url", ""),
+                "api_key": custom.get("api_key", ""),
+            }
+    except Exception:
+        pass
+
+    logger.debug("Unrecognised compact fallback entry: %s", entry)
+    return None
+
+
+def _load_fallback_providers(task: str = None) -> List[Dict[str, str]]:
+    """Load fallback_providers from config.yaml (cached per process).
+
+    Supports two config shapes:
+      1. Flat list (backward-compatible):
+         fallback_providers:
+           - provider: openai ...
+      2. Task-specific dict:
+         fallback_providers:
+           default:
+             - provider: openai ...
+           compression:
+             - provider: anthropic ...
+           summary:
+             - provider: custom ...
+
+    When a task-specific list exists it is returned; otherwise the ``default``
+    list is used.  If the key is a flat list it is treated as the ``default``
+    list.
+    """
     global _cached_fallback_providers
+    _task = (task or "default").strip().lower() or "default"
+
     if _cached_fallback_providers is not None:
-        return _cached_fallback_providers
+        return _cached_fallback_providers.get(_task) or _cached_fallback_providers.get("default") or []
+
     try:
         from hermes_cli.config import load_config
         cfg = load_config()
         raw = cfg.get("fallback_providers")
-        # cfg.get("key") returns None (not the default) when the key exists
-        # with a null/yaml-null value, so we must distinguish "absent" from "null".
-        # ruamel.yaml returns CommentedSeq instead of plain list — accept any
-        # non-string iterable.
         if raw is None:
-            providers = []
-        elif isinstance(raw, (str, bytes)):
-            providers = []
-        else:
-            try:
-                providers = list(raw)
-            except Exception:
-                providers = []
-        if providers:
-            logger.debug(
-                "Loaded %d fallback provider(s) from config.yaml", len(providers))
-        elif raw is not None:
-            # Key exists but is not a list — warn so operators can fix config.
-            logger.warning(
-                "fallback_providers in config.yaml is not a list (got %s); ignoring.",
-                type(raw).__name__)
-        _cached_fallback_providers = providers
+            _cached_fallback_providers = {"default": []}
+            return []
+
+        def _expand_list(entries):
+            out = []
+            for e in entries:
+                expanded = _expand_fallback_entry(e)
+                if expanded is not None:
+                    out.append(expanded)
+            return out
+
+        # Shape 1: flat list (legacy)
+        if isinstance(raw, list):
+            _cached_fallback_providers = {"default": _expand_list(raw)}
+            return _cached_fallback_providers.get(_task) or []
+
+        # Shape 2: dict of task -> list
+        if isinstance(raw, dict):
+            parsed: Dict[str, List[Dict[str, str]]] = {}
+            for key, value in raw.items():
+                if isinstance(value, list):
+                    parsed[key.strip().lower()] = _expand_list(value)
+                else:
+                    logger.warning(
+                        "fallback_providers[%s] is not a list (got %s); ignoring.",
+                        key, type(value).__name__)
+            _cached_fallback_providers = parsed
+            return parsed.get(_task) or parsed.get("default") or []
+
+        # Unexpected shape
+        logger.warning(
+            "fallback_providers in config.yaml has unexpected type %s; ignoring.",
+            type(raw).__name__)
+        _cached_fallback_providers = {"default": []}
     except Exception as exc:
         logger.warning("Could not load fallback_providers from config: %s", exc)
-        _cached_fallback_providers = []
-    return _cached_fallback_providers
+        _cached_fallback_providers = {"default": []}
+    return []
 
 
 def _try_configured_fallback(
@@ -1324,7 +1455,7 @@ def _try_configured_fallback(
 
     If no fallback_providers are configured, falls through immediately.
     """
-    providers = _load_fallback_providers()
+    providers = _load_fallback_providers(task=task)
     if not providers:
         return None, None, ""
 
@@ -1402,6 +1533,35 @@ def _build_client_from_entry(
                 "OPENAI_API_KEY will be forwarded to base_url %s. "
                 "Set api_key explicitly in config.yaml to silence this.",
                 provider, base_url)
+
+        # Detect Anthropic-compatible endpoints (before OpenAI path normalisation)
+        _raw_path = parsed.path.rstrip("/")
+        is_anthropic_endpoint = (
+            provider == "anthropic"
+            or _raw_path == "/anthropic"
+            or "api.kimi.com" in parsed.netloc.lower()
+        )
+        if is_anthropic_endpoint:
+            try:
+                from agent.anthropic_adapter import build_anthropic_client, _is_oauth_token
+                token = api_key
+                base = base_url.strip().rstrip("/")
+                anthropic_client = build_anthropic_client(token, base)
+                is_oauth = _is_oauth_token(token)
+                client = AnthropicAuxiliaryClient(
+                    anthropic_client,
+                    model or "claude-sonnet-4-6",
+                    token,
+                    base,
+                    is_oauth=is_oauth,
+                )
+                return client, model
+            except Exception as exc:
+                logger.debug(
+                    "Failed to build Anthropic fallback client for %s: %s",
+                    base_url, exc)
+                return None, None
+
         # Normalize: if path is /anthropic or /, replace with /v1
         path = parsed.path.rstrip("/")
         if path in ("", "/anthropic"):
@@ -1410,6 +1570,43 @@ def _build_client_from_entry(
             base_url = f"{parsed.scheme}://{parsed.netloc}{path}"
         client = OpenAI(api_key=api_key, base_url=base_url)
         return client, model
+
+    # Case 1.5: provider name matches a custom_providers entry — resolve
+    # base_url + api_key from config so fallback list doesn't duplicate creds.
+    try:
+        from hermes_cli.runtime_provider import _get_named_custom_provider
+        custom_entry = _get_named_custom_provider(provider)
+        if custom_entry:
+            custom_base = custom_entry.get("base_url", "").strip()
+            custom_key = custom_entry.get("api_key", "").strip()
+            custom_key_env = custom_entry.get("key_env", "").strip()
+            if custom_key_env:
+                custom_key = os.getenv(custom_key_env, "").strip() or custom_key
+            custom_model = model or custom_entry.get("model", "").strip() or None
+            if custom_base and custom_key:
+                # Detect Anthropic api_mode
+                api_mode = custom_entry.get("api_mode", "")
+                is_anthropic = (
+                    api_mode == "anthropic_messages"
+                    or custom_base.rstrip("/").endswith("/anthropic")
+                    or "api.kimi.com" in custom_base.lower()
+                )
+                if is_anthropic:
+                    from agent.anthropic_adapter import build_anthropic_client, _is_oauth_token
+                    anthropic_client = build_anthropic_client(custom_key, custom_base)
+                    is_oauth = _is_oauth_token(custom_key)
+                    client = AnthropicAuxiliaryClient(
+                        anthropic_client,
+                        custom_model or "claude-sonnet-4-6",
+                        custom_key,
+                        custom_base,
+                        is_oauth=is_oauth,
+                    )
+                    return client, custom_model
+                client = OpenAI(api_key=custom_key, base_url=custom_base)
+                return client, custom_model
+    except Exception as exc:
+        logger.debug("Failed to resolve custom provider %s for fallback: %s", provider, exc)
 
     # Case 2: named provider → look up in registry / credential pool
     norm_provider = _normalize_aux_provider(provider)
@@ -2856,6 +3053,9 @@ def _build_call_kwargs(
     merged_extra = dict(extra_body or {})
     if provider == "nous" or auxiliary_is_nous:
         merged_extra.setdefault("tags", []).extend(["product=hermes-agent"])
+    # GLM thinking models return empty content unless thinking is disabled
+    if base_url and "open.bigmodel.cn" in base_url:
+        merged_extra.setdefault("enable_thinking", False)
     if merged_extra:
         kwargs["extra_body"] = merged_extra
 
