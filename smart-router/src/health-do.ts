@@ -168,17 +168,25 @@ export class HealthTracker implements DurableObject {
     if (h.consecutiveFailures >= rule.threshold) {
       h.status = "unhealthy";
       h.cooldownUntil = Date.now() + rule.cooldownMs;
+      console.log(`[CIRCUIT_BREAKER] TRIPPED: plan=${plan} provider=${provider} reason=${reason} failures=${h.consecutiveFailures} cooldownMs=${rule.cooldownMs} status=${status}`);
     } else if (h.consecutiveFailures >= Math.max(1, Math.floor(rule.threshold / 2))) {
       h.status = "degraded";
+      console.log(`[CIRCUIT_BREAKER] DEGRADED: plan=${plan} provider=${provider} reason=${reason} failures=${h.consecutiveFailures} status=${status}`);
+    } else {
+      console.log(`[CIRCUIT_BREAKER] RECORD_FAILURE: plan=${plan} provider=${provider} reason=${reason} failures=${h.consecutiveFailures} status=${status}`);
     }
   }
 
   recordSuccess(plan: string, provider: string): void {
     const h = this.getProviderHealth(plan, provider);
+    const wasUnhealthy = h.status === "unhealthy" || h.status === "degraded";
     h.status = "healthy";
     h.consecutiveFailures = 0;
     h.cooldownUntil = 0;
     h.lastFailureReason = "";
+    if (wasUnhealthy) {
+      console.log(`[CIRCUIT_BREAKER] RECOVERED: plan=${plan} provider=${provider}`);
+    }
   }
 
   getHealthyProviders(plan: string, providerList: ProviderConfig[]): ProviderConfig[] {
@@ -190,6 +198,7 @@ export class HealthTracker implements DurableObject {
 
       // If cooldown expired, auto-reset to healthy
       if (h.status === "unhealthy" && now >= h.cooldownUntil) {
+        console.log(`[CIRCUIT_BREAKER] COOLDOWN_EXPIRED: plan=${plan} provider=${p.name} reset to healthy`);
         h.status = "healthy";
         h.consecutiveFailures = 0;
         h.cooldownUntil = 0;

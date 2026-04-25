@@ -102,7 +102,7 @@ print("\n=== 2. Plan CRUD ===")
 test_slug = f"auto-test-{int(time.time())}"
 new_plan = {
     "providers": [
-        {"name": "orfree", "base_url": "http://localhost:23000/v1", "model": "auto", "format": "openai", "timeout": 30}
+        {"name": "orfree", "base_url": "http://localhost:23000/v1", "model": "auto", "format": "anthropic", "timeout": 30}
     ]
 }
 
@@ -118,8 +118,8 @@ assert_eq("get created plan provider name", fetched["providers"][0]["name"], "or
 
 updated_plan = {
     "providers": [
-        {"name": "orfree", "base_url": "http://localhost:23000/v1", "model": "auto", "format": "openai", "timeout": 45},
-        {"name": "volcengine", "base_url": "https://ark.cn-beijing.volces.com/api/coding/v3", "model": "ark-code-latest", "format": "openai", "timeout": 60}
+        {"name": "orfree", "base_url": "http://localhost:23000/v1", "model": "auto", "format": "anthropic", "timeout": 45},
+        {"name": "volcengine", "base_url": "https://ark.cn-beijing.volces.com/api/coding", "model": "ark-code-latest", "format": "anthropic", "timeout": 60}
     ]
 }
 status, updated = req("PUT", f"/v1/plans/{test_slug}", body=updated_plan)
@@ -165,9 +165,9 @@ fallback_slug = f"fallback-test-{int(time.time())}"
 fallback_plan = {
     "providers": [
         # First provider: unreachable → will fail with connection error
-        {"name": "orfree", "base_url": "http://localhost:1", "model": "auto", "format": "openai", "timeout": 5},
+        {"name": "orfree", "base_url": "http://localhost:1", "model": "auto", "format": "anthropic", "timeout": 5},
         # Second provider: working → should succeed on fallback
-        {"name": "orfree-real", "base_url": "http://localhost:23000/v1", "model": "auto", "format": "openai", "timeout": 30}
+        {"name": "orfree-real", "base_url": "http://localhost:23000/v1", "model": "auto", "format": "anthropic", "timeout": 30}
     ]
 }
 
@@ -180,8 +180,8 @@ fallback_plan = {
 
 fallback_plan = {
     "providers": [
-        {"name": "volcengine", "base_url": "http://localhost:1", "model": "auto", "format": "openai", "timeout": 5},
-        {"name": "orfree", "base_url": "http://localhost:23000/v1", "model": "auto", "format": "openai", "timeout": 30}
+        {"name": "volcengine", "base_url": "http://localhost:1", "model": "auto", "format": "anthropic", "timeout": 5},
+        {"name": "orfree", "base_url": "http://localhost:23000/v1", "model": "auto", "format": "anthropic", "timeout": 30}
     ]
 }
 
@@ -195,7 +195,7 @@ assert_true("fallback response has choices", isinstance(fb_resp, dict) and "choi
 all_bad_slug = f"all-bad-{int(time.time())}"
 all_bad_plan = {
     "providers": [
-        {"name": "volcengine", "base_url": "http://localhost:1", "model": "auto", "format": "openai", "timeout": 5},
+        {"name": "volcengine", "base_url": "http://localhost:1", "model": "auto", "format": "anthropic", "timeout": 5},
         {"name": "kimi", "base_url": "http://localhost:1", "model": "auto", "format": "anthropic", "timeout": 5}
     ]
 }
@@ -215,7 +215,7 @@ print("\n=== 5. Circuit Breaker ===")
 cb_slug = f"cb-test-{int(time.time())}"
 cb_plan = {
     "providers": [
-        {"name": "volcengine", "base_url": "http://localhost:1", "model": "auto", "format": "openai", "timeout": 5}
+        {"name": "volcengine", "base_url": "http://localhost:1", "model": "auto", "format": "anthropic", "timeout": 5}
     ]
 }
 req("POST", "/v1/plans", body={"slug": cb_slug, "config": cb_plan})

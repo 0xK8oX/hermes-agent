@@ -11,6 +11,14 @@ function isNativeAnthropic(baseUrl: string): boolean {
   return baseUrl.includes("anthropic.com") || baseUrl.includes("claude-api");
 }
 
+function buildEndpoint(baseUrl: string, format: string): string {
+  const base = baseUrl.replace(/\/v\d+$/, "");
+  if (format === "anthropic") {
+    return `${base}/v1/messages`;
+  }
+  return `${base}/v1/chat/completions`;
+}
+
 export async function callProvider(
   provider: ProviderConfig,
   apiKey: string,
@@ -32,9 +40,7 @@ export async function callProvider(
       headers["Authorization"] = `Bearer ${apiKey}`;
     }
 
-    const endpoint = provider.format === "anthropic"
-      ? `${provider.base_url}/v1/messages`
-      : `${provider.base_url}/chat/completions`;
+    const endpoint = buildEndpoint(provider.base_url, provider.format);
 
     const response = await fetch(endpoint, {
       method: "POST",
@@ -48,11 +54,13 @@ export async function callProvider(
   } catch (err) {
     clearTimeout(timeoutId);
     if (err instanceof Error && err.name === "AbortError") {
+      console.log(`[PROVIDER] TIMEOUT: ${provider.name} (${provider.base_url}) after ${provider.timeout}s`);
       return new Response(JSON.stringify({ error: "timeout" }), {
         status: 504,
         headers: { "Content-Type": "application/json" },
       });
     }
+    console.log(`[PROVIDER] CONNECTION_ERROR: ${provider.name} (${provider.base_url}) - ${err instanceof Error ? err.message : String(err)}`);
     throw err;
   }
 }

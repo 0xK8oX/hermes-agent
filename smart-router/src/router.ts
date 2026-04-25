@@ -21,6 +21,16 @@ interface HealthTrackerResult {
   providers: ProviderConfig[];
 }
 
+function classifyFailureForLog(status: number, message: string): string {
+  const msg = message.toLowerCase();
+  if (status === 402 || msg.includes("quota") || msg.includes("credit") || msg.includes("billing")) return "quota";
+  if (status === 429 || msg.includes("rate limit") || msg.includes("too many requests")) return "rate_limit";
+  if (status === 504 || msg.includes("timeout")) return "timeout";
+  if (status >= 500 && status < 600) return "server_error";
+  if (msg.includes("connection") || msg.includes("refused")) return "connection";
+  return "unknown";
+}
+
 async function getHealthyProviders(
   env: Env,
   plan: string,
@@ -125,6 +135,7 @@ export async function routeRequest(
   for (const provider of healthyProviders) {
     const apiKey = await getProviderKey(provider.name, env);
     if (!apiKey) {
+      console.log(`[ROUTER] MISSING_API_KEY: plan=${req.plan} provider=${provider.name}`);
       errors.push({ provider: provider.name, status: 0, message: "Missing API key" });
       continue;
     }
@@ -153,6 +164,7 @@ export async function routeRequest(
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      console.log(`[ROUTER] PROVIDER_EXCEPTION: plan=${req.plan} provider=${provider.name} error="${message}"`);
       await reportFailure(env, req.plan, provider.name, 0, message);
       errors.push({ provider: provider.name, status: 0, message });
       continue;
@@ -167,6 +179,8 @@ export async function routeRequest(
       } catch {
         // ignore
       }
+      const failureType = classifyFailureForLog(providerRes.status, message);
+      console.log(`[ROUTER] PROVIDER_HTTP_ERROR: plan=${req.plan} provider=${provider.name} status=${providerRes.status} type=${failureType} message="${message.replace(/\n/g, ' ')}"`);
       await reportFailure(env, req.plan, provider.name, providerRes.status, message);
       errors.push({ provider: provider.name, status: providerRes.status, message });
       continue;
