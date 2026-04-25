@@ -1,26 +1,49 @@
 /**
  * Smart Router - Config loading
  *
- * Loads provider pool definitions from bundled plans.json
- * and resolves API keys from Wrangler secrets.
+ * Resolves API keys from Wrangler secrets.
+ * Plan configurations are fetched from the PlanStore Durable Object at runtime.
  */
 
-import type { PlansConfig, ProviderConfig } from "./types";
-
-// plans.json is bundled at build time via import
-import plansJson from "../plans.json";
-
-const plans: PlansConfig = plansJson as PlansConfig;
+import type { ProviderConfig } from "./types";
 
 /**
- * Get a plan by name. Falls back to "default" if not found.
+ * Get a plan by name from the PlanStore DO.
+ * Falls back to "default" if not found.
  */
-export function getPlan(name: string): { providers: ProviderConfig[] } | null {
-  const plan = plans.plans[name] || plans.plans["default"];
-  if (!plan) {
-    return null;
+export async function getPlan(
+  env: Env,
+  name: string
+): Promise<{ providers: ProviderConfig[] } | null> {
+  const id = env.PLAN_STORE.idFromName("global");
+  const stub = env.PLAN_STORE.get(id);
+
+  try {
+    const res = await stub.fetch(
+      `https://fake-host/plans/${encodeURIComponent(name)}`,
+      { method: "GET" }
+    );
+    if (res.ok) {
+      return (await res.json()) as { providers: ProviderConfig[] };
+    }
+  } catch {
+    // fall through
   }
-  return plan;
+
+  // Fallback to "default"
+  try {
+    const res = await stub.fetch(
+      `https://fake-host/plans/default`,
+      { method: "GET" }
+    );
+    if (res.ok) {
+      return (await res.json()) as { providers: ProviderConfig[] };
+    }
+  } catch {
+    // fall through
+  }
+
+  return null;
 }
 
 /**
@@ -39,8 +62,11 @@ export function getProviderKey(providerName: string, env: Env): string | null {
 /**
  * Return a sorted list of provider names from a plan.
  */
-export function getProviderNames(planName: string): string[] {
-  const plan = getPlan(planName);
+export async function getProviderNames(
+  env: Env,
+  planName: string
+): Promise<string[]> {
+  const plan = await getPlan(env, planName);
   if (!plan) return [];
   return plan.providers.map((p) => p.name);
 }
@@ -48,11 +74,12 @@ export function getProviderNames(planName: string): string[] {
 /**
  * Get provider config by name within a plan.
  */
-export function getProviderConfig(
+export async function getProviderConfig(
+  env: Env,
   planName: string,
   providerName: string
-): ProviderConfig | null {
-  const plan = getPlan(planName);
+): Promise<ProviderConfig | null> {
+  const plan = await getPlan(env, planName);
   if (!plan) return null;
   return plan.providers.find((p) => p.name === providerName) || null;
 }

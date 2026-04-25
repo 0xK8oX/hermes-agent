@@ -102,7 +102,7 @@ export async function routeRequest(
   req: RouterRequest,
   env: Env
 ): Promise<Response> {
-  const planConfig = getPlan(req.plan);
+  const planConfig = await getPlan(env, req.plan);
   if (!planConfig || planConfig.providers.length === 0) {
     return new Response(
       JSON.stringify({ error: `Plan "${req.plan}" not found or empty` }),

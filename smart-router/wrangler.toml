@@ -7,6 +7,15 @@ compatibility_date = "2025-04-24"
 name = "HEALTH_TRACKER"
 class_name = "HealthTracker"
 
+# Durable Object binding for plan storage
+[[durable_objects.bindings]]
+name = "PLAN_STORE"
+class_name = "PlanStore"
+
 [[migrations]]
 tag = "v1"
 new_classes = ["HealthTracker"]
+
+[[migrations]]
+tag = "v2"
+new_classes = ["PlanStore"]

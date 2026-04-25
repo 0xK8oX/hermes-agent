@@ -4,6 +4,7 @@
 
 declare interface Env {
   HEALTH_TRACKER: DurableObjectNamespace;
+  PLAN_STORE: DurableObjectNamespace;
 }
 
 declare module "*.json" {
