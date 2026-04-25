@@ -1272,111 +1272,7 @@ def _normalize_main_runtime(main_runtime: Optional[Dict[str, Any]]) -> Dict[str,
     return normalized
 
 
-# NOTE: Cached for the lifetime of the process. Restart required to pick up
-# config.yaml changes to fallback_providers.
 _cached_fallback_providers: Optional[Dict[str, List[Dict[str, str]]]] = None
-
-# Mapping of compact fallback aliases to env vars.
-# Format in config.yaml: "kimi:k2p6:1"  -> provider:model:key_index
-_FALLBACK_ALIASES: Dict[str, Dict[str, Any]] = {
-    "kimi": {
-        "base_url_env": "KIMI_CODING_URL",
-        "api_key_envs": ["KIMI_API_KEY", "KIMI_API_KEY_2"],
-    },
-    "minimax": {
-        "base_url_env": "MINIMAX_ANTHROPIC_URL",
-        "api_key_envs": ["MINIMAX_API_KEY"],
-    },
-    "volcengine": {
-        "base_url_env": "VOLCENGINE_OPENAI_URL",
-        "api_key_envs": ["VOLCENGINE_API_KEY", "VOLCENGINE_API_KEY_2"],
-    },
-    "glm": {
-        "base_url_env": "GLM_CODING_URL",
-        "api_key_envs": ["GLM_API_KEY"],
-    },
-    "zaipu": {
-        "base_url_env": "GLM_CODING_URL",
-        "api_key_envs": ["GLM_API_KEY"],
-    },
-    "openrouter": {
-        "base_url_env": "OPENROUTER_LOCAL_URL",
-        "api_key_envs": ["OPENROUTER_API_KEY"],
-    },
-}
-
-
-def _expand_fallback_entry(entry: Any) -> Optional[Dict[str, str]]:
-    """Expand a fallback entry from compact string or dict to a normalised dict.
-
-    Compact string format: ``provider:model:key_index``
-      - provider: alias from _FALLBACK_ALIASES or custom provider name
-      - model:    model slug (optional)
-      - key_index: 1-based index into the alias's api_key_envs list (optional, defaults to 1)
-
-    Examples:
-      - "kimi:k2p6:1"        -> kimi provider, k2p6 model, first key
-      - "kimi:k2p6"          -> same, key_index defaults to 1
-      - "volcengine:ark-code-latest:2" -> volcengine, ark-code-latest, second key
-      - "minimax:minimax2.7" -> minimax, minimax2.7, first key
-      - "glm:glm-5.1"        -> glm, glm-5.1, first key
-      - "Open.bigmodel.cn:glm-5.1" -> lookup custom_providers by name
-
-    Dict entries are returned unchanged.
-    """
-    if isinstance(entry, dict):
-        # Defensive: coerce values to strings so downstream code is safe
-        return {str(k): str(v) if v is not None else "" for k, v in entry.items()}
-    if not isinstance(entry, str):
-        return None
-    parts = entry.split(":")
-    if not parts or not parts[0].strip():
-        return None
-
-    alias = parts[0].strip()
-    model = parts[1].strip() if len(parts) > 1 else ""
-    key_idx = 1
-    if len(parts) > 2:
-        try:
-            key_idx = max(1, int(parts[2].strip()))
-        except ValueError:
-            key_idx = 1
-
-    # Try known aliases first
-    spec = _FALLBACK_ALIASES.get(alias)
-    if spec:
-        base_url = spec.get("base_url") or os.getenv(spec.get("base_url_env", ""), "").strip()
-        api_key_envs = spec.get("api_key_envs", [])
-        api_key = spec.get("api_key")
-        if api_key is None and api_key_envs:
-            idx = min(key_idx - 1, len(api_key_envs) - 1)
-            api_key = os.getenv(api_key_envs[idx], "").strip()
-        if not base_url or not api_key:
-            logger.debug("Compact fallback alias %s missing base_url or api_key", alias)
-            return None
-        return {
-            "provider": alias,
-            "model": model or "",
-            "base_url": base_url,
-            "api_key": api_key,
-        }
-
-    # Unknown alias -> treat as custom provider name lookup (model is required)
-    try:
-        from hermes_cli.runtime_provider import _get_named_custom_provider
-        custom = _get_named_custom_provider(alias)
-        if custom:
-            return {
-                "provider": alias,
-                "model": model or custom.get("model", ""),
-                "base_url": custom.get("base_url", ""),
-                "api_key": custom.get("api_key", ""),
-            }
-    except Exception:
-        pass
-
-    logger.debug("Unrecognised compact fallback entry: %s", entry)
-    return None
 
 
 def _load_fallback_providers(task: str = None) -> List[Dict[str, str]]:
@@ -1413,17 +1309,12 @@ def _load_fallback_providers(task: str = None) -> List[Dict[str, str]]:
             _cached_fallback_providers = {"default": []}
             return []
 
-        def _expand_list(entries):
-            out = []
-            for e in entries:
-                expanded = _expand_fallback_entry(e)
-                if expanded is not None:
-                    out.append(expanded)
-            return out
+        def _filter_dicts(entries):
+            return [e for e in entries if isinstance(e, dict)]
 
         # Shape 1: flat list (legacy)
         if isinstance(raw, list):
-            _cached_fallback_providers = {"default": _expand_list(raw)}
+            _cached_fallback_providers = {"default": _filter_dicts(raw)}
             return _cached_fallback_providers.get(_task) or []
 
         # Shape 2: dict of task -> list
@@ -1431,7 +1322,7 @@ def _load_fallback_providers(task: str = None) -> List[Dict[str, str]]:
             parsed: Dict[str, List[Dict[str, str]]] = {}
             for key, value in raw.items():
                 if isinstance(value, list):
-                    parsed[key.strip().lower()] = _expand_list(value)
+                    parsed[key.strip().lower()] = _filter_dicts(value)
                 else:
                     logger.warning(
                         "fallback_providers[%s] is not a list (got %s); ignoring.",
