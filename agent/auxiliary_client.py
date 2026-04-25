@@ -1272,6 +1272,8 @@ def _normalize_main_runtime(main_runtime: Optional[Dict[str, Any]]) -> Dict[str,
     return normalized
 
 
+# NOTE: Cached for the lifetime of the process. Restart required to pick up
+# config.yaml changes to fallback_providers.
 _cached_fallback_providers: Optional[Dict[str, List[Dict[str, str]]]] = None
 
 # Mapping of compact fallback aliases to env vars.
@@ -1293,9 +1295,13 @@ _FALLBACK_ALIASES: Dict[str, Dict[str, Any]] = {
         "base_url_env": "GLM_CODING_URL",
         "api_key_envs": ["GLM_API_KEY"],
     },
+    "zaipu": {
+        "base_url_env": "GLM_CODING_URL",
+        "api_key_envs": ["GLM_API_KEY"],
+    },
     "openrouter": {
-        "base_url": "http://localhost:23000/v1",
-        "api_key": "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",
+        "base_url_env": "OPENROUTER_LOCAL_URL",
+        "api_key_envs": ["OPENROUTER_API_KEY"],
     },
 }
 
@@ -1319,11 +1325,12 @@ def _expand_fallback_entry(entry: Any) -> Optional[Dict[str, str]]:
     Dict entries are returned unchanged.
     """
     if isinstance(entry, dict):
-        return entry
+        # Defensive: coerce values to strings so downstream code is safe
+        return {str(k): str(v) if v is not None else "" for k, v in entry.items()}
     if not isinstance(entry, str):
         return None
     parts = entry.split(":")
-    if len(parts) < 1:
+    if not parts or not parts[0].strip():
         return None
 
     alias = parts[0].strip()
