@@ -148,6 +148,67 @@
           "timeout": 60
         }
       ]
+    },
+    "kato": {
+      "providers": [
+        {
+          "name": "kato-glm",
+          "base_url": "https://open.bigmodel.cn/api/anthropic",
+          "model": "glm-5.1",
+          "format": "anthropic",
+          "timeout": 60
+        },
+        {
+          "name": "kato-kimi",
+          "base_url": "https://api.kimi.com/coding/",
+          "model": "kimi-for-coding",
+          "format": "anthropic",
+          "timeout": 60
+        }
+      ]
+    },
+    "sam": {
+      "providers": [
+        {
+          "name": "sam-volcengine-k2",
+          "base_url": "https://ark.cn-beijing.volces.com/api/coding",
+          "model": "kimi-k2.6",
+          "format": "openai",
+          "timeout": 60
+        },
+        {
+          "name": "sam-volcengine-ark",
+          "base_url": "https://ark.cn-beijing.volces.com/api/coding",
+          "model": "ark-code-latest",
+          "format": "openai",
+          "timeout": 60
+        }
+      ]
+    },
+    "jason": {
+      "providers": [
+        {
+          "name": "jason-kimi",
+          "base_url": "https://api.kimi.com/coding/",
+          "model": "k2p6",
+          "format": "anthropic",
+          "timeout": 60
+        },
+        {
+          "name": "jason-volcengine",
+          "base_url": "https://ark.cn-beijing.volces.com/api/coding",
+          "model": "kimi-k2.6",
+          "format": "openai",
+          "timeout": 60
+        },
+        {
+          "name": "jason-minimax",
+          "base_url": "https://api.minimaxi.com/anthropic",
+          "model": "minimax2.7",
+          "format": "anthropic",
+          "timeout": 60
+        }
+      ]
     }
   }
 }
