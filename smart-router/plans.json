@@ -171,14 +171,14 @@
       "providers": [
         {
           "name": "sam-volcengine-k2",
-          "base_url": "https://ark.cn-beijing.volces.com/api/coding",
+          "base_url": "https://ark.cn-beijing.volces.com/api/coding/v3",
           "model": "kimi-k2.6",
           "format": "openai",
           "timeout": 60
         },
         {
           "name": "sam-volcengine-ark",
-          "base_url": "https://ark.cn-beijing.volces.com/api/coding",
+          "base_url": "https://ark.cn-beijing.volces.com/api/coding/v3",
           "model": "ark-code-latest",
           "format": "openai",
           "timeout": 60
