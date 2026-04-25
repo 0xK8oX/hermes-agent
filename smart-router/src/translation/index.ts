@@ -17,12 +17,16 @@ export function translateRequestToProvider(
 ): { url: string; headers: Record<string, string>; body: string; providerFormat: ClientFormat } {
   let translated: unknown;
 
+  // Only override model when client sends "auto" or nothing.
+  // If client sends a specific model, use that instead.
+  const modelToUse = (body.model === "auto" || !body.model) ? overrideModel : body.model;
+
   if (clientFormat === providerFormat) {
-    translated = body;
+    translated = modelToUse ? { ...body, model: modelToUse } : body;
   } else if (clientFormat === "openai" && providerFormat === "anthropic") {
-    translated = translateOpenAiRequestToAnthropic(body, overrideModel);
+    translated = translateOpenAiRequestToAnthropic(body, modelToUse);
   } else if (clientFormat === "anthropic" && providerFormat === "openai") {
-    translated = translateAnthropicRequestToOpenAi(body, overrideModel);
+    translated = translateAnthropicRequestToOpenAi(body, modelToUse);
   } else {
     translated = body;
   }

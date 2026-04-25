@@ -33,7 +33,7 @@ export async function callProvider(
     }
 
     const endpoint = provider.format === "anthropic"
-      ? `${provider.base_url}/messages`
+      ? `${provider.base_url}/v1/messages`
       : `${provider.base_url}/chat/completions`;
 
     const response = await fetch(endpoint, {

@@ -102,7 +102,7 @@ export function translateOpenAiRequestToAnthropic(body: any, overrideModel?: str
   }
 
   // Other params
-  if (body.max_tokens !== undefined) result.max_tokens = body.max_tokens;
+  result.max_tokens = body.max_tokens ?? 4096;
   if (body.temperature !== undefined) result.temperature = body.temperature;
   if (body.top_p !== undefined) result.top_p = body.top_p;
   if (body.stream !== undefined) result.stream = body.stream;

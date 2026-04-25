@@ -2,37 +2,151 @@
   "plans": {
     "default": {
       "providers": [
-        {"name": "minimax", "base_url": "https://api.minimax.chat/v1", "model": "minimax2.7", "format": "openai", "timeout": 60},
-        {"name": "kimi", "base_url": "https://api.kimi.com/v1", "model": "kimi-k2-6", "format": "anthropic", "timeout": 60},
-        {"name": "volcengine", "base_url": "https://ark.cn-beijing.volces.com/api/v3", "model": "ark-code-latest", "format": "openai", "timeout": 60},
-        {"name": "Open.bigmodel.cn", "base_url": "https://open.bigmodel.cn/api/paas/v4", "model": "glm-5.1", "format": "openai", "timeout": 60},
-        {"name": "openrouter", "base_url": "https://openrouter.ai/api/v1", "model": "openrouter/free", "format": "openai", "timeout": 60}
+        {
+          "name": "minimax",
+          "base_url": "https://api.minimaxi.com/anthropic",
+          "model": "minimax2.7",
+          "format": "anthropic",
+          "timeout": 60
+        },
+        {
+          "name": "kimi",
+          "base_url": "https://api.kimi.com/coding",
+          "model": "k2p6",
+          "format": "anthropic",
+          "timeout": 60
+        },
+        {
+          "name": "volcengine",
+          "base_url": "https://ark.cn-beijing.volces.com/api/coding/v3",
+          "model": "ark-code-latest",
+          "format": "openai",
+          "timeout": 60
+        },
+        {
+          "name": "Open.bigmodel.cn",
+          "base_url": "https://open.bigmodel.cn/api/coding/paas/v4",
+          "model": "glm-5.1",
+          "format": "openai",
+          "timeout": 60
+        },
+        {
+          "name": "openrouter",
+          "base_url": "http://localhost:23000/v1",
+          "model": "auto",
+          "format": "openai",
+          "timeout": 60
+        }
       ]
     },
     "compression": {
       "providers": [
-        {"name": "orfree", "base_url": "http://localhost:23000/v1", "model": "auto", "format": "openai", "timeout": 60},
-        {"name": "minimax", "base_url": "https://api.minimax.chat/v1", "model": "minimax2.7", "format": "openai", "timeout": 60},
-        {"name": "volcengine", "base_url": "https://ark.cn-beijing.volces.com/api/v3", "model": "ark-code-latest", "format": "openai", "timeout": 60},
-        {"name": "kimi", "base_url": "https://api.kimi.com/v1", "model": "kimi-k2-6", "format": "anthropic", "timeout": 60},
-        {"name": "Open.bigmodel.cn", "base_url": "https://open.bigmodel.cn/api/paas/v4", "model": "glm-5.1", "format": "openai", "timeout": 60}
+        {
+          "name": "orfree",
+          "base_url": "http://localhost:23000/v1",
+          "model": "auto",
+          "format": "openai",
+          "timeout": 60
+        },
+        {
+          "name": "minimax",
+          "base_url": "https://api.minimaxi.com/anthropic",
+          "model": "minimax2.7",
+          "format": "anthropic",
+          "timeout": 60
+        },
+        {
+          "name": "volcengine",
+          "base_url": "https://ark.cn-beijing.volces.com/api/coding/v3",
+          "model": "ark-code-latest",
+          "format": "openai",
+          "timeout": 60
+        },
+        {
+          "name": "kimi",
+          "base_url": "https://api.kimi.com/coding",
+          "model": "k2p6",
+          "format": "anthropic",
+          "timeout": 60
+        },
+        {
+          "name": "Open.bigmodel.cn",
+          "base_url": "https://open.bigmodel.cn/api/coding/paas/v4",
+          "model": "glm-5.1",
+          "format": "openai",
+          "timeout": 60
+        }
       ]
     },
     "summary": {
       "providers": [
-        {"name": "orfree", "base_url": "http://localhost:23000/v1", "model": "auto", "format": "openai", "timeout": 60},
-        {"name": "minimax", "base_url": "https://api.minimax.chat/v1", "model": "minimax2.7", "format": "openai", "timeout": 60},
-        {"name": "volcengine", "base_url": "https://ark.cn-beijing.volces.com/api/v3", "model": "ark-code-latest", "format": "openai", "timeout": 60},
-        {"name": "kimi", "base_url": "https://api.kimi.com/v1", "model": "kimi-k2-6", "format": "anthropic", "timeout": 60},
-        {"name": "Open.bigmodel.cn", "base_url": "https://open.bigmodel.cn/api/paas/v4", "model": "glm-5.1", "format": "openai", "timeout": 60}
+        {
+          "name": "orfree",
+          "base_url": "http://localhost:23000/v1",
+          "model": "auto",
+          "format": "openai",
+          "timeout": 60
+        },
+        {
+          "name": "minimax",
+          "base_url": "https://api.minimaxi.com/anthropic",
+          "model": "minimax2.7",
+          "format": "anthropic",
+          "timeout": 60
+        },
+        {
+          "name": "volcengine",
+          "base_url": "https://ark.cn-beijing.volces.com/api/coding/v3",
+          "model": "ark-code-latest",
+          "format": "openai",
+          "timeout": 60
+        },
+        {
+          "name": "kimi",
+          "base_url": "https://api.kimi.com/coding",
+          "model": "k2p6",
+          "format": "anthropic",
+          "timeout": 60
+        },
+        {
+          "name": "Open.bigmodel.cn",
+          "base_url": "https://open.bigmodel.cn/api/coding/paas/v4",
+          "model": "glm-5.1",
+          "format": "openai",
+          "timeout": 60
+        }
       ]
     },
     "coding": {
       "providers": [
-        {"name": "orfree", "base_url": "http://localhost:23000/v1", "model": "auto", "format": "openai", "timeout": 60},
-        {"name": "volcengine", "base_url": "https://ark.cn-beijing.volces.com/api/v3", "model": "ark-code-latest", "format": "openai", "timeout": 60},
-        {"name": "kimi", "base_url": "https://api.kimi.com/v1", "model": "kimi-k2-6", "format": "anthropic", "timeout": 60},
-        {"name": "Open.bigmodel.cn", "base_url": "https://open.bigmodel.cn/api/paas/v4", "model": "glm-5.1", "format": "openai", "timeout": 60}
+        {
+          "name": "orfree",
+          "base_url": "http://localhost:23000/v1",
+          "model": "auto",
+          "format": "openai",
+          "timeout": 60
+        },
+        {
+          "name": "volcengine",
+          "base_url": "https://ark.cn-beijing.volces.com/api/coding/v3",
+          "model": "ark-code-latest",
+          "format": "openai",
+          "timeout": 60
+        },
+        {
+          "name": "kimi",
+          "base_url": "https://api.kimi.com/coding",
+          "model": "k2p6",
+          "format": "anthropic",
+          "timeout": 60
+        },
+        {
+          "name": "Open.bigmodel.cn",
+          "base_url": "https://open.bigmodel.cn/api/coding/paas/v4",
+          "model": "glm-5.1",
+          "format": "openai",
+          "timeout": 60
+        }
       ]
     }
   }

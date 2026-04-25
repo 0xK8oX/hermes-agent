@@ -15,7 +15,7 @@ import {
   translateRequestToProvider,
   translateResponseToClient,
 } from "./translation";
-import { parseSseEvents, serializeSseEvents, anthropicSseToOpenAi, openAiSseToAnthropic } from "./translation/streaming";
+import { parseSseEvents, serializeSseEvents, createAnthropicSseToOpenAiTranslator, createOpenAiSseToAnthropicTranslator } from "./translation/streaming";
 
 interface HealthTrackerResult {
   providers: ProviderConfig[];
@@ -242,9 +242,9 @@ function createSseTransformStream(
   let buffer = "";
 
   const transform = providerFormat === "anthropic" && clientFormat === "openai"
-    ? anthropicSseToOpenAi
+    ? createAnthropicSseToOpenAiTranslator()
     : providerFormat === "openai" && clientFormat === "anthropic"
-    ? openAiSseToAnthropic
+    ? createOpenAiSseToAnthropicTranslator()
     : null;
 
   return new TransformStream({
