@@ -24,7 +24,7 @@
           "timeout": 60
         },
         {
-          "name": "Open.bigmodel.cn",
+          "name": "zaipu",
           "base_url": "https://open.bigmodel.cn/api/coding/paas/v4",
           "model": "glm-5.1",
           "format": "openai",
@@ -70,7 +70,7 @@
           "timeout": 60
         },
         {
-          "name": "Open.bigmodel.cn",
+          "name": "zaipu",
           "base_url": "https://open.bigmodel.cn/api/coding/paas/v4",
           "model": "glm-5.1",
           "format": "openai",
@@ -109,7 +109,7 @@
           "timeout": 60
         },
         {
-          "name": "Open.bigmodel.cn",
+          "name": "zaipu",
           "base_url": "https://open.bigmodel.cn/api/coding/paas/v4",
           "model": "glm-5.1",
           "format": "openai",
@@ -141,7 +141,7 @@
           "timeout": 60
         },
         {
-          "name": "Open.bigmodel.cn",
+          "name": "zaipu",
           "base_url": "https://open.bigmodel.cn/api/coding/paas/v4",
           "model": "glm-5.1",
           "format": "openai",
