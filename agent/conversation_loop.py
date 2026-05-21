@@ -131,9 +131,12 @@ def _restore_or_build_system_prompt(agent, system_message, conversation_history)
                 agent.session_id, exc,
             )
 
-    if stored_prompt:
+    if stored_prompt and not getattr(agent, "soul_identity", None):
         # Continuing session — reuse the exact system prompt from the
         # previous turn so the Anthropic cache prefix matches.
+        # Skip reuse when a channel-bound soul is active: the stored
+        # prompt was built with the old identity and would override
+        # the soul-bound persona.
         agent._cached_system_prompt = stored_prompt
         return
 

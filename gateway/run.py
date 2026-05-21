@@ -2107,6 +2107,27 @@ class GatewayRunner:
                 resolved_session_key = None
 
         model = _resolve_gateway_model(user_config)
+
+        # Channel binding extension hook: allow extensions (e.g.
+        # channel_binding) to inject per-session model/runtime overrides.
+        # Fire-and-forget — never break model resolution if extensions are
+        # absent or misbehave.
+        try:
+            from gateway.extensions import fire_hooks_first
+            _ch_overrides = fire_hooks_first("get_session_overrides", resolved_session_key) if resolved_session_key else None
+            if isinstance(_ch_overrides, dict) and _ch_overrides:
+                _ch_model = _ch_overrides.get("model") or model
+                _ch_runtime = {
+                    "provider": _ch_overrides.get("provider"),
+                    "api_key": _ch_overrides.get("api_key"),
+                    "base_url": _ch_overrides.get("base_url"),
+                    "api_mode": _ch_overrides.get("api_mode"),
+                }
+                if _ch_runtime.get("api_key") or _ch_overrides.get("model"):
+                    return _ch_model, _ch_runtime
+        except Exception:
+            pass
+
         override = self._session_model_overrides.get(resolved_session_key) if resolved_session_key else None
         if override:
             override_model = override.get("model", model)
@@ -4395,6 +4416,14 @@ class GatewayRunner:
                         # be garbage-collected.  Otherwise the cache grows
                         # unbounded across the gateway's lifetime.
                         self._evict_cached_agent(key)
+
+                        # Channel binding extension hook: notify on session cleanup
+                        try:
+                            from gateway.extensions import fire_hooks
+                            fire_hooks("on_session_cleanup", key)
+                        except Exception:
+                            pass
+
                         # Mark as finalized and persist to disk so the flag
                         # survives gateway restarts.
                         with self.session_store._lock:
@@ -7223,6 +7252,27 @@ class GatewayRunner:
         if canonical == "personality":
             return await self._handle_personality_command(event)
 
+        if canonical == "bind":
+            from gateway.extensions.channel_binding import handle_bind_command, consume_bind_reset
+            reply = await handle_bind_command(self.session_store, event)
+            # /bind may signal a session reset (soul switch). Evict the cached
+            # agent and rotate the session_id so the next message builds a fresh
+            # system prompt with the new identity instead of reusing the stale
+            # stored prompt from the session DB.
+            source = event.source
+            channel_id = getattr(source, "chat_id", None)
+            if channel_id and consume_bind_reset(channel_id):
+                session_key = self._session_key_for_source(source)
+                self._invalidate_session_run_generation(session_key, reason="bind_reset")
+                self._evict_cached_agent(session_key)
+                self.session_store.reset_session(session_key)
+                self._session_model_overrides.pop(session_key, None)
+                self._set_session_reasoning_override(session_key, None)
+                if hasattr(self, "_pending_model_notes"):
+                    self._pending_model_notes.pop(session_key, None)
+                self._clear_session_boundary_security_state(session_key)
+            return reply
+
         if canonical == "kanban":
             return await self._handle_kanban_command(event)
 
@@ -7903,10 +7953,30 @@ class GatewayRunner:
                 "session_id": session_entry.session_id,
                 "session_key": session_key,
             })
-        
+            # Channel binding extension hook: notify extensions of new session
+            try:
+                from gateway.extensions import fire_hooks
+                fire_hooks("on_new_session", session_key, event)
+            except Exception:
+                pass
+
+        # Channel binding extension hook: retrieve checkpoint for session continuity
+        try:
+            from gateway.extensions import fire_hooks_first
+            _checkpoint_ctx = fire_hooks_first("get_checkpoint", session_key)
+        except Exception:
+            _checkpoint_ctx = None
+
+        # Channel binding extension hook: allow extensions to override skills
+        try:
+            from gateway.extensions import fire_hooks_first
+            _ext_skills = fire_hooks_first("get_skills_override", session_key)
+        except Exception:
+            _ext_skills = None
+
         # Build session context
         context = build_session_context(source, self.config, session_entry)
-        
+
         # Set session context variables for tools (task-local, concurrency-safe)
         _session_env_tokens = self._set_session_env(context)
         
@@ -8433,6 +8503,7 @@ class GatewayRunner:
                 run_generation=run_generation,
                 event_message_id=self._reply_anchor_for_event(event),
                 channel_prompt=event.channel_prompt,
+                skills_override=_ext_skills,
             )
 
             # Stop persistent typing indicator now that the agent is done
@@ -8511,6 +8582,13 @@ class GatewayRunner:
             # session_entry so transcript writes below go to the right session.
             if agent_result.get("session_id") and agent_result["session_id"] != session_entry.session_id:
                 session_entry.session_id = agent_result["session_id"]
+
+            # Channel binding extension hook: save checkpoint after turn completion
+            try:
+                from gateway.extensions import fire_hooks
+                fire_hooks("save_checkpoint", session_key)
+            except Exception:
+                pass
 
             # Prepend reasoning/thinking if display is enabled (per-platform)
             try:
@@ -9112,6 +9190,13 @@ class GatewayRunner:
                 self._record_telegram_topic_binding(source, new_entry)
             except Exception:
                 logger.debug("Failed to rebind Telegram topic after /new", exc_info=True)
+
+        # Channel binding extension hook: notify on session reset
+        try:
+            from gateway.extensions import fire_hooks
+            fire_hooks("on_session_reset", session_key)
+        except Exception:
+            pass
 
         # Fire plugin on_session_reset hook (new session guaranteed to exist)
         try:
@@ -11376,6 +11461,26 @@ class GatewayRunner:
                 source=source,
                 user_config=user_config,
             )
+
+            # Channel binding extension hook for background tasks
+            try:
+                from gateway.extensions import fire_hooks_first
+                _bg_session_key = self._session_key_for_source(source)
+                _bg_overrides = fire_hooks_first("get_session_overrides", _bg_session_key) if _bg_session_key else None
+                if isinstance(_bg_overrides, dict) and _bg_overrides:
+                    _bg_model = _bg_overrides.get("model") or model
+                    _bg_runtime = {
+                        "provider": _bg_overrides.get("provider"),
+                        "api_key": _bg_overrides.get("api_key"),
+                        "base_url": _bg_overrides.get("base_url"),
+                        "api_mode": _bg_overrides.get("api_mode"),
+                    }
+                    if _bg_runtime.get("api_key"):
+                        model = _bg_model
+                        runtime_kwargs = _bg_runtime
+            except Exception:
+                pass
+
             if not runtime_kwargs.get("api_key"):
                 await adapter.send(
                     source.chat_id,
@@ -14681,6 +14786,7 @@ class GatewayRunner:
         enabled_toolsets: list,
         ephemeral_prompt: str,
         cache_keys: dict | None = None,
+        soul_identity: str | None = None,
     ) -> str:
         """Compute a stable string key from agent config values.
 
@@ -14718,6 +14824,7 @@ class GatewayRunner:
                 # cached agent and doesn't affect system prompt or tools.
                 ephemeral_prompt or "",
                 _cache_keys_sorted,
+                soul_identity or "",
             ],
             sort_keys=True,
             default=str,
@@ -15406,6 +15513,7 @@ class GatewayRunner:
         _interrupt_depth: int = 0,
         event_message_id: Optional[str] = None,
         channel_prompt: Optional[str] = None,
+        skills_override: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """
         Run the agent with the given message and context.
@@ -15445,6 +15553,9 @@ class GatewayRunner:
 
         from hermes_cli.tools_config import _get_platform_tools
         enabled_toolsets = sorted(_get_platform_tools(user_config, platform_key))
+        # Merge channel-binding skills override (e.g. from /bind <soul>)
+        if skills_override:
+            enabled_toolsets = sorted(set(enabled_toolsets) | set(skills_override))
         agent_cfg_local = user_config.get("agent") or {}
         disabled_toolsets = agent_cfg_local.get("disabled_toolsets") or None
 
@@ -16114,6 +16225,17 @@ class GatewayRunner:
             if self._ephemeral_system_prompt:
                 combined_ephemeral = (combined_ephemeral + "\n\n" + self._ephemeral_system_prompt).strip()
 
+            # Channel binding extension hook: inject per-session soul content
+            # (e.g. from /bind <soul> or config-level channel_personality_bindings).
+            _soul_content = None
+            try:
+                from gateway.extensions import fire_hooks_first
+                _soul_content = fire_hooks_first("get_ephemeral", session_key) if session_key else None
+                if _soul_content:
+                    combined_ephemeral = (combined_ephemeral + "\n\n" + _soul_content).strip()
+            except Exception:
+                pass
+
             # Re-read .env and config for fresh credentials (gateway is long-lived,
             # keys may change without restart). Keep config.yaml authoritative for
             # runtime budget settings bridged into env vars.
@@ -16259,6 +16381,7 @@ class GatewayRunner:
                 enabled_toolsets,
                 combined_ephemeral,
                 cache_keys=self._extract_cache_busting_config(user_config),
+                soul_identity=_soul_content,
             )
             agent = None
             _cache_lock = getattr(self, "_agent_cache_lock", None)
@@ -16310,6 +16433,7 @@ class GatewayRunner:
                     gateway_session_key=session_key,
                     session_db=self._session_db,
                     fallback_model=self._fallback_model,
+                    soul_identity=_soul_content,
                 )
                 if _cache_lock and _cache is not None:
                     with _cache_lock:

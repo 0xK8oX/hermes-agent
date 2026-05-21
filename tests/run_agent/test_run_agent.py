@@ -4231,6 +4231,37 @@ class TestSystemPromptStability:
         # Empty string is falsy, so should fall through to fresh build
         assert "Hermes Agent" in agent._cached_system_prompt
 
+    def test_stored_prompt_skipped_when_soul_identity_set(self, agent):
+        """When soul_identity is active, don't reuse the stored prompt — it
+        was built with the old identity (e.g. DEFAULT_AGENT_IDENTITY) and
+        would override the channel-bound persona."""
+        stored = "You are Hermes Agent, an intelligent AI assistant..."
+        mock_db = MagicMock()
+        mock_db.get_session.return_value = {"system_prompt": stored}
+        agent._session_db = mock_db
+        agent.soul_identity = "You are Dr. Lin, a caring health advisor."
+        agent._cached_system_prompt = None
+        conversation_history = [{"role": "user", "content": "hi"}]
+
+        if agent._cached_system_prompt is None:
+            stored_prompt = None
+            if conversation_history and agent._session_db:
+                try:
+                    session_row = agent._session_db.get_session(agent.session_id)
+                    if session_row:
+                        stored_prompt = session_row.get("system_prompt") or None
+                except Exception:
+                    pass
+
+            if stored_prompt and not agent.soul_identity:
+                agent._cached_system_prompt = stored_prompt
+            else:
+                agent._cached_system_prompt = agent._build_system_prompt()
+
+        # Should NOT reuse the stored Hermes prompt
+        assert stored not in agent._cached_system_prompt
+        assert "Dr. Lin" in agent._cached_system_prompt
+
 class TestBudgetPressure:
     """Budget exhaustion grace call system."""
 

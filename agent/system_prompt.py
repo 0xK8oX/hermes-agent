@@ -83,11 +83,12 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
     # ── Stable tier ────────────────────────────────────────────────
     stable_parts: List[str] = []
 
-    # Try SOUL.md as primary identity unless the caller explicitly skipped it.
-    # Some execution modes (cron) still want HERMES_HOME persona while keeping
-    # cwd project instructions disabled.
+    # Try soul_identity (channel binding) first, then SOUL.md, then fallback.
     _soul_loaded = False
-    if agent.load_soul_identity or not agent.skip_context_files:
+    if getattr(agent, "soul_identity", None):
+        stable_parts.append(agent.soul_identity)
+        _soul_loaded = True
+    elif agent.load_soul_identity or not agent.skip_context_files:
         _soul_content = _r.load_soul_md()
         if _soul_content:
             stable_parts.append(_soul_content)

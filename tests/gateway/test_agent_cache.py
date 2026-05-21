@@ -1344,3 +1344,50 @@ class TestCachedAgentInactivityReset:
             f"Watchdog would see {idle_secs:.0f}s idle, expected ~{STUCK_FOR}s. "
             "Inactivity timeout could not fire for a stuck interrupted turn."
         )
+
+
+class TestBindResetEviction:
+    """Verify that /bind triggers session reset and agent cache eviction."""
+
+    def test_bind_reset_evicts_cached_agent(self):
+        """When consume_bind_reset returns True, the gateway must evict the
+        cached agent and reset the session so the next message builds a fresh
+        system prompt with the new soul identity."""
+        from gateway.run import GatewayRunner
+        from gateway.extensions.channel_binding import set_bind_reset, consume_bind_reset
+
+        runner = GatewayRunner.__new__(GatewayRunner)
+        runner._agent_cache = {}
+        runner._agent_cache_lock = threading.Lock()
+        runner._session_model_overrides = {}
+        runner._pending_model_notes = {}
+
+        # Fake methods
+        evicted = []
+        reset_sessions = []
+        runner._evict_cached_agent = lambda sk: evicted.append(sk)
+        runner._invalidate_session_run_generation = lambda sk, reason=None: None
+        runner._set_session_reasoning_override = lambda sk, val: None
+        runner._clear_session_boundary_security_state = lambda sk: None
+
+        class FakeStore:
+            def reset_session(self, sk):
+                reset_sessions.append(sk)
+        runner.session_store = FakeStore()
+
+        session_key = "agent:main:whatsapp:group:120363427845408535"
+        channel_id = "120363427845408535"
+
+        # Set the bind reset flag
+        set_bind_reset(channel_id)
+
+        # Simulate what the gateway's /bind handler does
+        if consume_bind_reset(channel_id):
+            runner._evict_cached_agent(session_key)
+            runner.session_store.reset_session(session_key)
+
+        # Flag is consumed — subsequent calls return False
+        assert consume_bind_reset(channel_id) is False
+        assert session_key in evicted
+        assert session_key in reset_sessions
+

@@ -137,6 +137,7 @@ def init_agent(
     checkpoint_max_total_size_mb: int = 500,
     checkpoint_max_file_size_mb: int = 10,
     pass_session_id: bool = False,
+    soul_identity: str = None,
 ):
     """
     Initialize the AI Agent.
@@ -185,6 +186,9 @@ def init_agent(
         load_soul_identity (bool): If True, still use ~/.hermes/SOUL.md as the primary
             identity even when skip_context_files=True. Project context files from the cwd
             remain skipped.
+        soul_identity (str): Channel-bound soul text that replaces SOUL.md /
+            DEFAULT_AGENT_IDENTITY in the stable system prompt tier. Used by
+            the gateway channel binding extension (/bind <soul>).
     """
     _install_safe_stdio()
 
@@ -214,6 +218,7 @@ def init_agent(
     agent.background_review_callback = None  # Optional sync callback for gateway delivery
     agent.skip_context_files = skip_context_files
     agent.load_soul_identity = load_soul_identity
+    agent.soul_identity = soul_identity
     agent.pass_session_id = pass_session_id
     agent._credential_pool = credential_pool
     agent.log_prefix_chars = log_prefix_chars

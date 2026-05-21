@@ -236,6 +236,8 @@ def _compression_threshold_for_model(model: Optional[str]) -> Optional[float]:
     """
     if _is_arcee_trinity_thinking(model):
         return 0.75
+    if model and "glm" in model.lower():
+        return 0.80
     return None
 
 # Default auxiliary models for direct API-key providers (cheap/fast for side tasks)
